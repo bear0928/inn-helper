@@ -9,7 +9,7 @@ from streamlit_sortables import sort_items
 # --- 網頁基礎設定 ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
-# 強制讓 st.code 自動換行，並調整輸入框字體
+# 強制讓 st.code 自動換行
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
@@ -36,6 +36,7 @@ def load_data():
         return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
 def save_data(df):
+    """確保將資料寫入 CSV 檔案並確實推送到 GitHub origin main"""
     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
     df = df.sort_values(by="priority")
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
@@ -43,12 +44,15 @@ def save_data(df):
     try:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         commit_message = f"Update CSV: {current_time}"
+        
+        # 依序執行 git 指令，明確指定 origin main
         subprocess.run(["git", "add", CSV_FILE], check=True)
         subprocess.run(["git", "commit", "-m", commit_message], check=True)
         subprocess.run(["git", "push", "origin", "main"], check=True)
-        st.toast(f"🚀 已同步至 GitHub: {commit_message}")
+        
+        st.toast(f"🚀 成功推送至 GitHub origin main: {commit_message}")
     except Exception as e:
-        st.warning(f"本地檔案已儲存，但 Git 同步失敗")
+        st.warning(f"檔案已存在本地，但 Git 自動推送失敗。請檢查 Codespaces 權限。")
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
@@ -74,27 +78,35 @@ else:
     else:
         staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
 
-# --- 3. 新增模板區塊 (加大輸入框) ---
+# --- 3. 新增模板區塊 (新增後自動清空) ---
 if is_admin:
     st.sidebar.divider()
     with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
-        n_title = st.text_input("模板標題 (必填)")
-        n_note = st.text_input("備註標籤")
-        # 加大新增時的內容框
-        n_en = st.text_area("英文內容", height=250)
-        n_tw = st.text_area("中文內容", height=250)
+        # 使用 key 來控制內容，以便儲存後清空
+        new_title = st.text_input("模板標題 (必填)", key="input_title")
+        new_note = st.text_input("備註標籤", key="input_note")
+        new_en = st.text_area("英文內容", height=250, key="input_en")
+        new_tw = st.text_area("中文內容", height=250, key="input_tw")
         
         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
         
         if st.button("💾 確認儲存模板"):
-            if n_title:
-                new_data = {
-                    "branch": branch, "category": target_cat, "title": n_title, 
-                    "content_en": n_en, "content_tw": n_tw, "note": n_note, 
+            if new_title:
+                new_row = {
+                    "branch": branch, "category": target_cat, "title": new_title, 
+                    "content_en": new_en, "content_tw": new_tw, "note": new_note, 
                     "priority": len(st.session_state.df) + 1
                 }
-                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_data])], ignore_index=True)
+                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(st.session_state.df)
+                
+                # --- 重點：手動清空輸入框內容 ---
+                st.session_state.input_title = ""
+                st.session_state.input_note = ""
+                st.session_state.input_en = ""
+                st.session_state.input_tw = ""
+                
+                st.success("✅ 儲存成功並已清空欄位")
                 st.rerun()
 
 st.sidebar.divider()
@@ -151,18 +163,16 @@ else:
                         save_data(st.session_state.df)
                         st.rerun()
                 
-                # --- 修改區塊 (加大輸入框至 300px) ---
                 if st.session_state.get(f"edit_{idx}", False):
                     with st.container(border=True):
-                        st.subheader(f"🛠️ 正在修改：{row['title']}")
+                        st.subheader(f"🛠️ 修改模板：{row['title']}")
                         et = st.text_input("修改標題", row['title'], key=f"t_{idx}")
                         en = st.text_input("修改備註", row['note'], key=f"n_{idx}")
-                        # 這裡使用 height=300 讓框框變大
                         ee = st.text_area("修改英文內容", row['content_en'], key=f"en_{idx}", height=300)
                         etw = st.text_area("修改中文內容", row['content_tw'], key=f"tw_{idx}", height=300)
                         
                         c1, c2 = st.columns(2)
-                        if c1.button("💾 儲存並同步 GitHub", key=f"s_{idx}"):
+                        if c1.button("💾 儲存並同步", key=f"s_{idx}"):
                             st.session_state.df.at[idx, 'title'] = et
                             st.session_state.df.at[idx, 'note'] = en
                             st.session_state.df.at[idx, 'content_en'] = ee
@@ -170,6 +180,6 @@ else:
                             save_data(st.session_state.df)
                             st.session_state[f"edit_{idx}"] = False
                             st.rerun()
-                        if c2.button("✖️ 取消修改", key=f"c_{idx}"):
+                        if c2.button("✖️ 取消", key=f"c_{idx}"):
                             st.session_state[f"edit_{idx}"] = False
                             st.rerun()
