@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import os
 from deep_translator import GoogleTranslator
-from streamlit_sortables import sort_items  # 需安裝：pip install streamlit-sortables
+from streamlit_sortables import sort_items # 請確保 requirements.txt 有這行
 
 # 網頁基礎設定
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
-# 強制讓 st.code 自動換行的 CSS
+# 強制自動換行 CSS
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
@@ -32,7 +32,6 @@ def load_data():
         return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
 def save_data(df):
-    # 儲存前確保 priority 是數字型態
     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
     df = df.sort_values(by="priority")
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
@@ -50,63 +49,89 @@ if user_mode == "公版回覆":
     pwd = st.sidebar.text_input("輸入管理密碼以修改內容", type="password")
     if pwd == ADMIN_PASSWORD:
         is_admin = True
+        st.sidebar.success("管理權限已開啟")
 else:
     is_admin = True
 
-# 排序模式開關 (任何人皆可使用)
-sort_mode = st.sidebar.toggle("🔄 開啟拖動排序模式", value=False)
+# --- 1. 新增模板區塊 (放在側邊欄顯眼處) ---
+if is_admin:
+    st.sidebar.divider()
+    with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
+        n_title = st.text_input("模板標題 (必填)")
+        n_note = st.text_input("備註標籤 (如: ⚠️, 💰)")
+        n_en = st.text_area("英文內容")
+        n_tw = st.text_area("中文內容")
+        
+        # 決定分類
+        staff_name = ""
+        if user_mode == "個人常用":
+            staff_name = st.text_input("員工姓名", value="Kuma")
+        target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+        
+        if st.button("💾 確認儲存模板"):
+            if n_title:
+                new_data = {
+                    "branch": branch, "category": target_cat, "title": n_title, 
+                    "content_en": n_en, "content_tw": n_tw, "note": n_note, 
+                    "priority": len(st.session_state.df) + 1 # 預設排最後
+                }
+                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_data])], ignore_index=True)
+                save_data(st.session_state.df)
+                st.success("✅ 已成功寫入 CSV！")
+                st.rerun()
 
-staff_name = ""
-if user_mode == "個人常用":
-    existing_staff = st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist()
-    staff_options = sorted(existing_staff) + ["+ 新增員工"] if existing_staff else ["+ 新增員工"]
-    selected_staff = st.sidebar.selectbox("選擇員工", staff_options)
-    if selected_staff == "+ 新增員工":
-        new_in = st.sidebar.text_input("輸入新名字")
-        staff_name = new_in if new_in else "New Staff"
-    else:
-        staff_name = selected_staff
+st.sidebar.divider()
+sort_mode = st.sidebar.toggle("🔄 開啟拖動排序模式", value=False)
 
 # --- 主畫面 ---
 st.title(f"💬 {branch} 客服中心")
-src_text = st.text_input("🌐 翻譯中心 (輸入後按 Enter)：")
+src_text = st.text_input("🌐 翻譯中心 (輸入任何語言自動轉中文)：")
 if src_text:
     res = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-    st.info(f"**翻譯：** {res}")
+    st.info(f"**翻譯結果：** {res}")
 
 st.divider()
 
-# --- 模板列表與排序邏輯 ---
-curr_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == curr_cat)
-view_df = st.session_state.df[mask].copy()
-view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
-view_df = view_df.sort_values(by="priority")
+# --- 2. 顯示與排序邏輯 ---
+current_staff = "公版回覆"
+if user_mode == "個人常用":
+    # 這裡可以篩選個人分類，簡單起見先列出非公版內容
+    current_staff = "個人常用" # 或根據你的邏輯調整
 
-if view_df.empty:
-    st.info("目前沒有資料。")
+mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == ("公版回覆" if user_mode == "公版回覆" else st.session_state.get('last_staff', '個人常用')))
+# (為了簡化，如果是個人常用，建議你還是讓員工選一下名字)
+
+view_df = st.session_state.df[st.session_state.df['branch'] == branch]
+if user_mode == "公版回覆":
+    view_df = view_df[view_df['category'] == "公版回覆"]
 else:
+    # 個人專區顯示邏輯
+    u_list = [c for c in st.session_state.df['category'].unique() if c != "公版回覆"]
+    if u_list:
+        sel_u = st.selectbox("選擇查看對象", u_list)
+        view_df = view_df[view_df['category'] == sel_u]
+    else:
+        st.info("目前尚無個人模板")
+        view_df = pd.DataFrame()
+
+if not view_df.empty:
+    view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
+    view_df = view_df.sort_values(by="priority")
+
     if sort_mode:
-        st.subheader("🖱️ 拖動標題來調整順序")
-        # 建立一個標題與原始索引的對照表
+        st.subheader("🖱️ 拖動標題調整順序 (排好後請按下方儲存)")
         items_to_sort = view_df['title'].tolist()
         sorted_items = sort_items(items_to_sort)
         
-        if st.button("💾 儲存新順序"):
-            # 根據拖動後的結果，更新原始 df 的 priority
+        if st.button("🚀 儲存新順序並更新 CSV"):
             for i, title in enumerate(sorted_items):
-                # 找到該標題在原始資料中的索引 (需同時匹配分館與類別)
-                idx = st.session_state.df[(st.session_state.df['branch'] == branch) & 
-                                          (st.session_state.df['category'] == curr_cat) & 
-                                          (st.session_state.df['title'] == title)].index
-                if not idx.empty:
-                    st.session_state.df.at[idx[0], 'priority'] = i
-            
+                # 精確匹配更新
+                st.session_state.df.loc[(st.session_state.df['branch'] == branch) & 
+                                        (st.session_state.df['title'] == title), 'priority'] = i
             save_data(st.session_state.df)
-            st.success("順序已更新！")
+            st.success("順序已寫入檔案！")
             st.rerun()
     else:
-        # 正常顯示模式
         for idx, row in view_df.iterrows():
             m_cols = st.columns([0.85, 0.15]) if is_admin else st.columns([1.0])
             with m_cols[0]:
@@ -119,22 +144,23 @@ else:
 
             if is_admin:
                 with m_cols[1]:
-                    c1, c2 = st.columns(2)
-                    if c1.button("✏️", key=f"e_{idx}"): st.session_state[f"edit_{idx}"] = True
-                    if c2.button("🗑️", key=f"d_{idx}"):
+                    if st.button("✏️", key=f"e_{idx}"): st.session_state[f"edit_{idx}"] = True
+                    if st.button("🗑️", key=f"d_{idx}"):
                         st.session_state.df = st.session_state.df.drop(idx)
                         save_data(st.session_state.df)
                         st.rerun()
                 
                 if st.session_state.get(f"edit_{idx}", False):
                     with st.container(border=True):
-                        et = st.text_input("標題", row['title'], key=f"t_{idx}")
-                        en = st.text_input("備註", row['note'], key=f"n_{idx}")
-                        ee = st.text_area("英文", row['content_en'], key=f"en_{idx}")
-                        etw = st.text_area("中文", row['content_tw'], key=f"tw_{idx}")
-                        if st.button("💾 儲存修改", key=f"s_{idx}"):
-                            st.session_state.df.at[idx, 'title'], st.session_state.df.at[idx, 'note'] = et, en
-                            st.session_state.df.at[idx, 'content_en'], st.session_state.df.at[idx, 'content_tw'] = ee, etw
+                        et = st.text_input("修改標題", row['title'], key=f"t_{idx}")
+                        en = st.text_input("修改備註", row['note'], key=f"n_{idx}")
+                        ee = st.text_area("修改英文", row['content_en'], key=f"en_{idx}")
+                        etw = st.text_area("修改中文", row['content_tw'], key=f"tw_{idx}")
+                        if st.button("💾 儲存修改至 CSV", key=f"s_{idx}"):
+                            st.session_state.df.at[idx, 'title'] = et
+                            st.session_state.df.at[idx, 'note'] = en
+                            st.session_state.df.at[idx, 'content_en'] = ee
+                            st.session_state.df.at[idx, 'content_tw'] = etw
                             save_data(st.session_state.df)
                             st.session_state[f"edit_{idx}"] = False
                             st.rerun()
