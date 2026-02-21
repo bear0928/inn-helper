@@ -9,6 +9,7 @@ from streamlit_sortables import sort_items
 # --- 網頁基礎設定 ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
+# 強制讓 st.code 自動換行
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
@@ -35,30 +36,34 @@ def load_data():
         return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
 def save_data(df):
-    """將資料寫入 CSV 並推送至 GitHub"""
+    """確保將資料寫入 CSV 檔案並推送到 GitHub origin main"""
+    # 確保 priority 格式正確
     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
     df = df.sort_values(by="priority")
+    
+    # A. 務必先存本地檔案，確保 Codespaces 的 CSV 會更新
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
     
+    # B. 嘗試 Git 推送
     try:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         commit_message = f"Update CSV: {current_time}"
         
-        # 執行 git 推送
+        # 依序執行指令
         subprocess.run(["git", "add", CSV_FILE], check=True)
-        # 捕捉 commit 輸出，避免無變動時報錯
+        # 捕捉 commit 可能產生的「無變動」錯誤
         subprocess.run(["git", "commit", "-m", commit_message], capture_output=True)
         subprocess.run(["git", "push", "origin", "main"], check=True)
         
-        st.toast(f"🚀 已同步至 GitHub: {commit_message}")
+        st.toast(f"🚀 成功同步至 GitHub: {commit_message}")
     except Exception as e:
-        # 在雲端環境(Streamlit Cloud) 失敗是正常的，不影響本地存檔
-        pass
+        # 如果是雲端權限問題，至少提示一下，但本地檔案已經存好了
+        st.warning("本地 CSV 已儲存，但 GitHub 同步失敗 (請檢查終端機權限)")
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
 
-# --- 2. 側邊欄 ---
+# --- 2. 側邊欄設定 ---
 st.sidebar.title("🏨 管理系統")
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
@@ -74,40 +79,42 @@ else:
     is_admin = True
     existing_staff = [c for c in st.session_state.df['category'].unique() if c != "公版回覆"]
     if existing_staff:
-        staff_name = st.sidebar.selectbox("員工帳號", sorted(existing_staff))
+        staff_name = st.sidebar.selectbox("切換員工帳號", sorted(existing_staff))
     else:
-        staff_name = st.sidebar.text_input("新員工姓名", value="Kuma")
+        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
 
-# --- 3. 新增模板 (移除手動清空 state 的語法) ---
+# --- 3. 新增模板區塊 (改用 st.form 確保自動清空) ---
 if is_admin:
     st.sidebar.divider()
     with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
-        # 移除 key，或者保留 key 但不要在程式中手動修改它
-        n_t = st.text_input("模板標題 (必填)")
-        n_n = st.text_input("備註標籤")
-        n_e = st.text_area("英文內容", height=250)
-        n_w = st.text_area("中文內容", height=250)
-        
-        target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-        
-        if st.button("💾 確認儲存模板"):
-            if n_t:
-                new_row = {
-                    "branch": branch, "category": target_cat, "title": n_t, 
-                    "content_en": n_e, "content_tw": n_w, "note": n_n, 
-                    "priority": len(st.session_state.df) + 1
-                }
-                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
-                save_data(st.session_state.df)
-                
-                st.success("✅ 儲存成功！")
-                # 透過 rerun 重啟 App，輸入框就會自動清空
-                st.rerun()
+        # clear_on_submit=True 會在按下按鈕後清空所有輸入框
+        with st.form("add_template_form", clear_on_submit=True):
+            n_t = st.text_input("模板標題 (必填)")
+            n_n = st.text_input("備註標籤")
+            n_e = st.text_area("英文內容", height=250)
+            n_w = st.text_area("中文內容", height=250)
+            
+            submit_button = st.form_submit_button("💾 確認儲存模板")
+            
+            if submit_button:
+                if n_t:
+                    target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+                    new_row = {
+                        "branch": branch, "category": target_cat, "title": n_t, 
+                        "content_en": n_e, "content_tw": n_w, "note": n_n, 
+                        "priority": len(st.session_state.df) + 1
+                    }
+                    st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.df)
+                    st.success("✅ 儲存成功並已重置表單")
+                    st.rerun()
+                else:
+                    st.error("❌ 標題不可為空")
 
 st.sidebar.divider()
 sort_mode = st.sidebar.toggle("🔄 開啟拖動排序模式", value=False)
 
-# --- 4. 主畫面 ---
+# --- 4. 主畫面：翻譯功能 ---
 st.title(f"💬 {branch} 客服中心")
 src_text = st.text_input("🌐 翻譯中心：")
 if src_text:
@@ -116,7 +123,7 @@ if src_text:
 
 st.divider()
 
-# --- 5. 顯示與排序 ---
+# --- 5. 顯示與排序邏輯 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & 
                               (st.session_state.df['category'] == current_cat)].copy()
@@ -167,7 +174,7 @@ else:
                         etw = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=300)
                         
                         c1, c2 = st.columns(2)
-                        if c1.button("💾 儲存並同步", key=f"s_{idx}"):
+                        if c1.button("💾 儲存並同步 GitHub", key=f"s_{idx}"):
                             st.session_state.df.at[idx, 'title'] = et
                             st.session_state.df.at[idx, 'note'] = en
                             st.session_state.df.at[idx, 'content_en'] = ee
