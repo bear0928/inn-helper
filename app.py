@@ -6,8 +6,6 @@ from datetime import datetime
 from deep_translator import GoogleTranslator
 from streamlit_sortables import sort_items
 
-git config --global user.email "maggie.x168@gmail.com"
-git config --global user.name "bear0928"
 
 # --- 網頁基礎設定 ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
