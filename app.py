@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="喜園旅館客服系統", layout="wide")
+st.set_page_config(page_title="旅館客服系統", layout="wide")
 
 # --- 資料讀取 ---
 CSV_FILE = 'templates.csv'
@@ -13,7 +13,7 @@ else:
     df = pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw"])
 
 # --- 側邊欄設定 ---
-st.sidebar.title("🏨 喜園旅館分館系統")
+st.sidebar.title("🏨 客服系統")
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "西門館", "花園館"])
 user_mode = st.sidebar.radio("類別", ["公版回覆", "個人常用"])
 staff_name = ""
