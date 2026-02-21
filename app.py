@@ -4,7 +4,7 @@ import os
 from deep_translator import GoogleTranslator
 
 # 網頁基礎設定
-st.set_page_config(page_title="旅館客服系統", layout="wide")
+st.set_page_config(page_title="喜園旅館客服系統", layout="wide")
 
 # 強制讓 st.code 自動換行的 CSS
 st.markdown("""
@@ -26,15 +26,17 @@ def load_data():
     if os.path.exists(CSV_FILE):
         try:
             df = pd.read_csv(CSV_FILE)
-            required_cols = ["branch", "category", "title", "content_en", "content_tw", "note"]
+            # 檢查並補足必要的欄位，新增 priority
+            required_cols = ["branch", "category", "title", "content_en", "content_tw", "note", "priority"]
             for col in required_cols:
                 if col not in df.columns:
-                    df[col] = ""
+                    # 預設排序值給 999 (排在後面)
+                    df[col] = 999 if col == "priority" else ""
             return df
         except:
-            return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note"])
+            return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
     else:
-        return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note"])
+        return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
 def save_data(df):
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
@@ -76,20 +78,24 @@ st.sidebar.divider()
 if is_admin:
     with st.sidebar.expander("➕ 新增模板"):
         n_title = st.text_input("標題")
+        n_prio = st.number_input("排序序號 (愈小愈前面)", value=1, step=1)
         n_note = st.text_input("備註標籤")
         n_en = st.text_area("英文內容")
         n_tw = st.text_area("中文內容")
         t_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
         if st.button("確認儲存"):
             if n_title:
-                new_data = {"branch": branch, "category": t_cat, "title": n_title, "content_en": n_en, "content_tw": n_tw, "note": n_note}
+                new_data = {
+                    "branch": branch, "category": t_cat, "title": n_title, 
+                    "content_en": n_en, "content_tw": n_tw, "note": n_note, "priority": n_prio
+                }
                 st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_data])], ignore_index=True)
                 save_data(st.session_state.df)
                 st.rerun()
 
 # --- 4. 翻譯功能 ---
 st.title(f"💬 {branch} 客服中心")
-src_text = st.text_input("🌐 輸入外文訊息並按 Enter：")
+src_text = st.text_input("🌐 輸入外文訊息並按 Enter 翻譯：")
 if src_text:
     res = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
     st.info(f"**翻譯：** {res}")
@@ -99,21 +105,26 @@ st.divider()
 # --- 5. 模板列表 ---
 st.subheader(f"📄 {user_mode}清單")
 curr_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+
+# 篩選資料並排序 (先按 priority, 後按原本順序)
 mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == curr_cat)
-view_df = st.session_state.df[mask]
+view_df = st.session_state.df[mask].copy()
+if not view_df.empty:
+    view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
+    view_df = view_df.sort_values(by="priority")
 
 if view_df.empty:
     st.info("目前沒有資料。")
 else:
     for idx, row in view_df.iterrows():
-        # 修正欄位比例，避免出現 0.00 導致報錯
         m_cols = st.columns([0.85, 0.15]) if is_admin else st.columns([1.0])
         
         with m_cols[0]:
             label = f"🏷️ {row['note']}" if row['note'] else ""
-            with st.expander(f"📌 {row['title']} {label}"):
+            # 在標題前面顯示排序號碼，方便管理
+            display_title = f"[{int(row['priority'])}] 📌 {row['title']} {label}" if is_admin else f"📌 {row['title']} {label}"
+            with st.expander(display_title):
                 if label: st.warning(f"💡 {row['note']}")
-                # 改為單欄上下排列，並應用自動換行 CSS
                 st.write("**🇺🇸 English**")
                 st.code(row['content_en'], language="text")
                 st.write("**🇹🇼 中文**")
@@ -132,12 +143,16 @@ else:
             if st.session_state.get(f"edit_{idx}", False):
                 with st.container(border=True):
                     et = st.text_input("標題", row['title'], key=f"t_{idx}")
+                    ep = st.number_input("排序序號", value=int(row['priority']), key=f"p_{idx}")
                     en = st.text_input("備註", row['note'], key=f"n_{idx}")
                     ee = st.text_area("英文", row['content_en'], key=f"en_{idx}")
                     etw = st.text_area("中文", row['content_tw'], key=f"tw_{idx}")
                     if st.button("💾 儲存修改", key=f"s_{idx}"):
-                        st.session_state.df.at[idx, 'title'], st.session_state.df.at[idx, 'note'] = et, en
-                        st.session_state.df.at[idx, 'content_en'], st.session_state.df.at[idx, 'content_tw'] = ee, etw
+                        st.session_state.df.at[idx, 'title'] = et
+                        st.session_state.df.at[idx, 'priority'] = ep
+                        st.session_state.df.at[idx, 'note'] = en
+                        st.session_state.df.at[idx, 'content_en'] = ee
+                        st.session_state.df.at[idx, 'content_tw'] = etw
                         save_data(st.session_state.df)
                         st.session_state[f"edit_{idx}"] = False
                         st.rerun()
