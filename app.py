@@ -6,7 +6,17 @@ from deep_translator import GoogleTranslator
 # 網頁基礎設定
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
-# --- 設定密碼 (可自行修改) ---
+# 強制讓 st.code 自動換行的 CSS
+st.markdown("""
+    <style>
+    code {
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 設定管理密碼 ---
 ADMIN_PASSWORD = "ximen888" 
 
 # --- 1. 資料處理函數 ---
@@ -29,129 +39,105 @@ def load_data():
 def save_data(df):
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
 
-# 初始化 Session State
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
 
 # --- 2. 側邊欄設定 ---
 st.sidebar.title("🏨 管理系統")
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙館"])
-user_mode = st.sidebar.radio("類別", ["公版回覆", "個人常用"])
+user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
 
-# 權限檢查
 is_admin = False
 if user_mode == "公版回覆":
-    pwd = st.sidebar.text_input("輸入管理密碼以修改公版", type="password")
+    pwd = st.sidebar.text_input("輸入管理密碼以修改", type="password")
     if pwd == ADMIN_PASSWORD:
         is_admin = True
-        st.sidebar.success("管理員已解鎖")
+        st.sidebar.success("管理權限已開啟")
     elif pwd:
-        st.sidebar.error("密碼錯誤")
+        st.sidebar.error("密碼不正確")
 else:
-    is_admin = True # 個人專區預設可編輯自己的
+    is_admin = True
 
 staff_name = ""
 if user_mode == "個人常用":
     existing_staff = st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist()
-    if not existing_staff:
-        existing_staff = ["Kuma"]
-    staff_options = sorted(existing_staff) + ["+ 新增員工"]
-    selected_staff = st.sidebar.selectbox("選擇員工姓名", staff_options)
+    staff_options = sorted(existing_staff) + ["+ 新增員工"] if existing_staff else ["+ 新增員工"]
+    selected_staff = st.sidebar.selectbox("選擇員工", staff_options)
     
     if selected_staff == "+ 新增員工":
-        new_staff_input = st.sidebar.text_input("請輸入新員工姓名")
-        staff_name = new_staff_input if new_staff_input else "New Staff"
+        new_in = st.sidebar.text_input("輸入新名字")
+        staff_name = new_in if new_in else "New Staff"
     else:
         staff_name = selected_staff
 
 st.sidebar.divider()
 
-# --- 3. 新增模板功能 ---
+# --- 3. 新增模板 ---
 if is_admin:
-    with st.sidebar.expander("➕ 新增回覆模板"):
-        new_title = st.text_input("模板標題")
-        new_note = st.text_input("小備註 (標籤)")
-        new_en = st.text_area("英文內容", key="new_en")
-        new_tw = st.text_area("中文內容", key="new_tw")
-        target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-        
-        if st.button("確認儲存模板"):
-            if new_title:
-                new_row = {
-                    "branch": branch, "category": target_cat,
-                    "title": new_title, "content_en": new_en,
-                    "content_tw": new_tw, "note": new_note
-                }
-                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
+    with st.sidebar.expander("➕ 新增模板"):
+        n_title = st.text_input("標題")
+        n_note = st.text_input("備註標籤")
+        n_en = st.text_area("英文內容")
+        n_tw = st.text_area("中文內容")
+        t_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+        if st.button("確認儲存"):
+            if n_title:
+                new_data = {"branch": branch, "category": t_cat, "title": n_title, "content_en": n_en, "content_tw": n_tw, "note": n_note}
+                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_data])], ignore_index=True)
                 save_data(st.session_state.df)
-                st.success(f"✅ 已存入 {target_cat}")
                 st.rerun()
 
-# --- 4. 主畫面：翻譯窗口 ---
-st.title(f"💬 {branch} 客服小幫手")
-source_text = st.text_input("🌐 貼上顧客訊息並按下 Enter 翻譯：")
-if source_text:
-    try:
-        translated_res = GoogleTranslator(source='auto', target='zh-TW').translate(source_text)
-        st.info(f"**【翻譯結果】**\n\n{translated_res}")
-    except:
-        st.error("翻譯連線超時")
+# --- 4. 翻譯功能 ---
+st.title(f"💬 {branch} 客服中心")
+src_text = st.text_input("🌐 輸入外文訊息並按 Enter：")
+if src_text:
+    res = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
+    st.info(f"**翻譯：** {res}")
 
 st.divider()
 
-# --- 5. 主畫面：模板庫 ---
-st.subheader(f"📄 {user_mode}：{staff_name if user_mode=='個人常用' else ''}")
-current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)
+# --- 5. 模板列表 ---
+st.subheader(f"📄 {user_mode}清單")
+curr_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == curr_cat)
 view_df = st.session_state.df[mask]
 
 if view_df.empty:
-    st.info("尚無模板。")
+    st.info("目前沒有資料。")
 else:
-    for index, row in view_df.iterrows():
-        # --- 修正後的佈局邏輯 ---
-        if is_admin:
-            # 管理員模式：顯示 標題(大)、編輯(小)、刪除(小)
-            cols = st.columns([0.8, 0.1, 0.1])
-            col_main, col_edit, col_del = cols[0], cols[1], cols[2]
-        else:
-            # 一般模式：只顯示標題
-            cols = st.columns([1.0])
-            col_main = cols[0]
-
-        with col_main:
-            note_label = f" 🏷️ {row['note']}" if pd.notna(row['note']) and row['note'] != "" else ""
-            with st.expander(f"📌 {row['title']} {note_label}"):
-                if note_label: st.warning(f"**💡 提示：** {row['note']}")
-                c_en, c_tw = st.columns(2)
-                c_en.code(row['content_en'], language="text")
-                c_tw.code(row['content_tw'], language="text")
+    for idx, row in view_df.iterrows():
+        # 修正欄位比例，避免出現 0.00 導致報錯
+        m_cols = st.columns([0.85, 0.15]) if is_admin else st.columns([1.0])
+        
+        with m_cols[0]:
+            label = f"🏷️ {row['note']}" if row['note'] else ""
+            with st.expander(f"📌 {row['title']} {label}"):
+                if label: st.warning(f"💡 {row['note']}")
+                # 改為單欄上下排列，並應用自動換行 CSS
+                st.write("**🇺🇸 English**")
+                st.code(row['content_en'], language="text")
+                st.write("**🇹🇼 中文**")
+                st.code(row['content_tw'], language="text")
 
         if is_admin:
-            if col_edit.button("✏️", key=f"ed_{index}"):
-                st.session_state[f"edit_{index}"] = True
-            if col_del.button("🗑️", key=f"de_{index}"):
-                st.session_state.df = st.session_state.df.drop(index)
-                save_data(st.session_state.df)
-                st.rerun()
-
-            # 編輯區 (點擊鉛筆後出現)
-            if st.session_state.get(f"edit_{index}", False):
+            with m_cols[1]:
+                c1, c2 = st.columns(2)
+                if c1.button("✏️", key=f"e_{idx}"): st.session_state[f"edit_{idx}"] = True
+                if c2.button("🗑️", key=f"d_{idx}"):
+                    st.session_state.df = st.session_state.df.drop(idx)
+                    save_data(st.session_state.df)
+                    st.rerun()
+            
+            # 編輯區域
+            if st.session_state.get(f"edit_{idx}", False):
                 with st.container(border=True):
-                    st.write(f"✍️ 編輯模板：{row['title']}")
-                    e_title = st.text_input("標題", value=row['title'], key=f"ti_{index}")
-                    e_note = st.text_input("備註", value=row['note'], key=f"no_{index}")
-                    e_en = st.text_area("英文", value=row['content_en'], key=f"en_{index}")
-                    e_tw = st.text_area("中文", value=row['content_tw'], key=f"tw_{index}")
-                    cb1, cb2 = st.columns(2)
-                    if cb1.button("💾 儲存", key=f"sv_{index}"):
-                        st.session_state.df.at[index, 'title'] = e_title
-                        st.session_state.df.at[index, 'note'] = e_note
-                        st.session_state.df.at[index, 'content_en'] = e_en
-                        st.session_state.df.at[index, 'content_tw'] = e_tw
+                    et = st.text_input("標題", row['title'], key=f"t_{idx}")
+                    en = st.text_input("備註", row['note'], key=f"n_{idx}")
+                    ee = st.text_area("英文", row['content_en'], key=f"en_{idx}")
+                    etw = st.text_area("中文", row['content_tw'], key=f"tw_{idx}")
+                    if st.button("💾 儲存修改", key=f"s_{idx}"):
+                        st.session_state.df.at[idx, 'title'], st.session_state.df.at[idx, 'note'] = et, en
+                        st.session_state.df.at[idx, 'content_en'], st.session_state.df.at[idx, 'content_tw'] = ee, etw
                         save_data(st.session_state.df)
-                        st.session_state[f"edit_{index}"] = False
-                        st.rerun()
-                    if cb2.button("✖️ 取消", key=f"cc_{index}"):
-                        st.session_state[f"edit_{index}"] = False
+                        st.session_state[f"edit_{idx}"] = False
                         st.rerun()
