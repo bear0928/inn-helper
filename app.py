@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
 import os
+import subprocess
+from datetime import datetime
 from deep_translator import GoogleTranslator
-from streamlit_sortables import sort_items # 請確保 requirements.txt 有這行
+from streamlit_sortables import sort_items
 
-# 網頁基礎設定
+# --- 網頁基礎設定 ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
-# 強制自動換行 CSS
+# 強制讓 st.code 自動換行，避免文字超出螢幕
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
@@ -17,8 +19,9 @@ st.markdown("""
 ADMIN_PASSWORD = "000000" 
 CSV_FILE = 'templates.csv'
 
-# --- 1. 資料處理函數 ---
+# --- 1. 資料處理與自動 Git 功能 ---
 def load_data():
+    """載入 CSV，若無檔案則建立空資料表"""
     if os.path.exists(CSV_FILE):
         try:
             df = pd.read_csv(CSV_FILE)
@@ -33,10 +36,26 @@ def load_data():
         return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
 def save_data(df):
-    """確保將資料寫入 CSV 檔案"""
+    """將資料寫入 CSV，並自動執行 Git Push 推回 GitHub Main 分支"""
+    # 確保 priority 欄位正確並排序
     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
     df = df.sort_values(by="priority")
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
+    
+    # 自動 Git 推送
+    try:
+        # 取得目前時間作為 Commit 訊息
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_message = f"Update CSV: {current_time}"
+
+        # 執行指令 (add, commit, push)
+        subprocess.run(["git", "add", CSV_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", commit_message], check=True)
+        subprocess.run(["git", "push", "origin", "main"], check=True)
+        
+        st.toast(f"🚀 已成功同步至 GitHub: {commit_message}")
+    except Exception as e:
+        st.warning(f"本地檔案已儲存，但 Git 同步失敗 (可能是無變動或權限問題)")
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
@@ -47,7 +66,7 @@ branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙
 user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
 
 is_admin = False
-staff_name = "Kuma" # 預設名稱
+staff_name = "Kuma" # 預設員工名稱
 
 if user_mode == "公版回覆":
     pwd = st.sidebar.text_input("輸入管理密碼以修改內容", type="password")
@@ -55,7 +74,7 @@ if user_mode == "公版回覆":
         is_admin = True
         st.sidebar.success("管理權限已開啟")
 else:
-    # 個人常用模式，密碼非強制，但預設開啟編輯權限
+    # 個人常用模式預設開啟編輯權限
     is_admin = True
     existing_staff = [c for c in st.session_state.df['category'].unique() if c != "公版回覆"]
     if existing_staff:
@@ -83,7 +102,6 @@ if is_admin:
                 }
                 st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_data])], ignore_index=True)
                 save_data(st.session_state.df)
-                st.success(f"✅ 已成功存入 {target_cat}！")
                 st.rerun()
 
 st.sidebar.divider()
@@ -91,7 +109,7 @@ sort_mode = st.sidebar.toggle("🔄 開啟拖動排序模式", value=False)
 
 # --- 4. 主畫面：翻譯功能 ---
 st.title(f"💬 {branch} 客服中心")
-src_text = st.text_input("🌐 翻譯中心 (輸入任何語言自動轉中文)：")
+src_text = st.text_input("🌐 翻譯中心 (輸入任何語言自動轉繁體中文)：")
 if src_text:
     res = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
     st.info(f"**翻譯結果：** {res}")
@@ -99,18 +117,14 @@ if src_text:
 st.divider()
 
 # --- 5. 顯示與排序邏輯 ---
-# 根據當前選擇過濾資料
-if user_mode == "公版回覆":
-    view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & 
-                                  (st.session_state.df['category'] == "公版回覆")]
-else:
-    view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & 
-                                  (st.session_state.df['category'] == staff_name)]
+# 根據分館與類別過濾
+current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & 
+                              (st.session_state.df['category'] == current_cat)].copy()
 
 if view_df.empty:
-    st.info(f"目前【{staff_name if user_mode == '個人常用' else '公版'}】尚無模板。")
+    st.info(f"目前【{current_cat}】尚無模板內容。")
 else:
-    # 確保排序正確
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values(by="priority")
 
@@ -119,19 +133,17 @@ else:
         items_to_sort = view_df['title'].tolist()
         sorted_items = sort_items(items_to_sort)
         
-        if st.button("🚀 儲存新順序並更新 CSV"):
+        if st.button("🚀 儲存新順序並更新 GitHub"):
             for i, title in enumerate(sorted_items):
-                # 找出原始 df 中正確的那一筆進行更新
                 target_mask = (st.session_state.df['branch'] == branch) & \
-                              (st.session_state.df['category'] == ("公版回覆" if user_mode == "公版回覆" else staff_name)) & \
+                              (st.session_state.df['category'] == current_cat) & \
                               (st.session_state.df['title'] == title)
                 st.session_state.df.loc[target_mask, 'priority'] = i
             
             save_data(st.session_state.df)
-            st.success("順序已寫入檔案！")
             st.rerun()
     else:
-        # 正常顯示模式
+        # 顯示模式
         for idx, row in view_df.iterrows():
             m_cols = st.columns([0.85, 0.15]) if is_admin else st.columns([1.0])
             with m_cols[0]:
@@ -156,7 +168,7 @@ else:
                         en = st.text_input("修改備註", row['note'], key=f"n_{idx}")
                         ee = st.text_area("修改英文", row['content_en'], key=f"en_{idx}")
                         etw = st.text_area("修改中文", row['content_tw'], key=f"tw_{idx}")
-                        if st.button("💾 儲存修改至 CSV", key=f"s_{idx}"):
+                        if st.button("💾 儲存修改至 CSV 並同步", key=f"s_{idx}"):
                             st.session_state.df.at[idx, 'title'] = et
                             st.session_state.df.at[idx, 'note'] = en
                             st.session_state.df.at[idx, 'content_en'] = ee
