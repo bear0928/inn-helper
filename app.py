@@ -4,7 +4,7 @@ import os
 from deep_translator import GoogleTranslator
 
 # 網頁基礎設定
-st.set_page_config(page_title="喜園旅館客服系統", layout="wide")
+st.set_page_config(page_title="客服系統", layout="wide")
 
 # 強制讓 st.code 自動換行的 CSS
 st.markdown("""
