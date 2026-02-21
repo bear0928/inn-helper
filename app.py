@@ -35,30 +35,61 @@ def load_data():
     else:
         return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
+# def save_data(df):
+#     """確保將資料寫入 CSV 檔案並推送到 GitHub origin main"""
+#     # 確保 priority 格式正確
+#     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
+#     df = df.sort_values(by="priority")
+    
+#     # A. 務必先存本地檔案，確保 Codespaces 的 CSV 會更新
+#     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
+    
+#     # B. 嘗試 Git 推送
+#     try:
+#         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#         commit_message = f"Update CSV: {current_time}"
+        
+#         # 依序執行指令
+#         subprocess.run(["git", "add", CSV_FILE], check=True)
+#         # 捕捉 commit 可能產生的「無變動」錯誤
+#         subprocess.run(["git", "commit", "-m", commit_message], capture_output=True)
+#         subprocess.run(["git", "push", "origin", "main"], check=True)
+        
+#         st.toast(f"🚀 成功同步至 GitHub: {commit_message}")
+#     except Exception as e:
+#         # 如果是雲端權限問題，至少提示一下，但本地檔案已經存好了
+#         st.warning("本地 CSV 已儲存，但 GitHub 同步失敗 (請檢查終端機權限)")
+
 def save_data(df):
-    """確保將資料寫入 CSV 檔案並推送到 GitHub origin main"""
-    # 確保 priority 格式正確
-    df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
-    df = df.sort_values(by="priority")
-    
-    # A. 務必先存本地檔案，確保 Codespaces 的 CSV 會更新
-    df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
-    
-    # B. 嘗試 Git 推送
+    """將資料寫入 CSV 並推送至 GitHub"""
     try:
+        # 1. 強制確保 priority 格式並排序
+        df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
+        df = df.sort_values(by="priority")
+        
+        # 2. 核心：先寫入本地 CSV，確保 Codespaces 檔案一定會變
+        df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
+        print(f"--- 本地 CSV 已寫入成功 ---") # 這會印在終端機
+
+        # 3. 嘗試 Git 推送
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         commit_message = f"Update CSV: {current_time}"
         
-        # 依序執行指令
-        subprocess.run(["git", "add", CSV_FILE], check=True)
-        # 捕捉 commit 可能產生的「無變動」錯誤
-        subprocess.run(["git", "commit", "-m", commit_message], capture_output=True)
-        subprocess.run(["git", "push", "origin", "main"], check=True)
+        # 使用 subprocess 執行，並抓取錯誤訊息
+        add_res = subprocess.run(["git", "add", CSV_FILE], capture_output=True, text=True)
+        commit_res = subprocess.run(["git", "commit", "-m", commit_message], capture_output=True, text=True)
+        push_res = subprocess.run(["git", "push", "origin", "main"], capture_output=True, text=True)
         
-        st.toast(f"🚀 成功同步至 GitHub: {commit_message}")
+        if push_res.returncode == 0:
+            st.toast(f"🚀 GitHub 同步成功！")
+        else:
+            # 如果 push 失敗，印出原因到終端機
+            print(f"Git Push 失敗原因: {push_res.stderr}")
+            st.warning("本地已存檔，但 GitHub 推送失敗 (請看終端機)")
+            
     except Exception as e:
-        # 如果是雲端權限問題，至少提示一下，但本地檔案已經存好了
-        st.warning("本地 CSV 已儲存，但 GitHub 同步失敗 (請檢查終端機權限)")
+        st.error(f"儲存過程發生錯誤: {e}")
+        print(f"System Error: {e}")
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
