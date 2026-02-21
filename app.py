@@ -6,6 +6,9 @@ from datetime import datetime
 from deep_translator import GoogleTranslator
 from streamlit_sortables import sort_items
 
+git config --global user.email "maggie.x168@gmail.com"
+git config --global user.name "bear0928"
+
 # --- 網頁基礎設定 ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
@@ -45,14 +48,22 @@ def save_data(df):
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         commit_message = f"Update CSV: {current_time}"
         
-        # 依序執行 git 指令，明確指定 origin main
+        # 加上 env 設定，確保 Git 能找到憑證
         subprocess.run(["git", "add", CSV_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", commit_message], check=True)
-        subprocess.run(["git", "push", "origin", "main"], check=True)
+        # 如果沒有變動，commit 會報錯，這裡加上 try 避免中斷
+        result = subprocess.run(["git", "commit", "-m", commit_message], capture_output=True, text=True)
         
-        st.toast(f"🚀 成功推送至 GitHub origin main: {commit_message}")
+        if "nothing to commit" in result.stdout:
+            st.toast("ℹ️ 資料無變動，無需推送")
+        else:
+            subprocess.run(["git", "push", "origin", "main"], check=True)
+            st.toast(f"🚀 成功推送至 GitHub: {commit_message}")
+            
+    except subprocess.CalledProcessError as e:
+        # 顯示更詳細的錯誤訊息在網頁上，方便排錯
+        st.error(f"Git 指令失敗: {e.stderr if hasattr(e, 'stderr') else str(e)}")
     except Exception as e:
-        st.warning(f"檔案已存在本地，但 Git 自動推送失敗。請檢查 Codespaces 權限。")
+        st.warning(f"Git 自動推送發生非預期錯誤: {e}")
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
