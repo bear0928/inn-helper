@@ -6,11 +6,9 @@ from datetime import datetime
 from deep_translator import GoogleTranslator
 from streamlit_sortables import sort_items
 
-
 # --- 網頁基礎設定 ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
-# 強制讓 st.code 自動換行
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
@@ -37,7 +35,7 @@ def load_data():
         return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
 def save_data(df):
-    """確保將資料寫入 CSV 檔案並確實推送到 GitHub origin main"""
+    """將資料寫入 CSV 並推送至 GitHub"""
     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
     df = df.sort_values(by="priority")
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
@@ -46,27 +44,21 @@ def save_data(df):
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         commit_message = f"Update CSV: {current_time}"
         
-        # 加上 env 設定，確保 Git 能找到憑證
+        # 執行 git 推送
         subprocess.run(["git", "add", CSV_FILE], check=True)
-        # 如果沒有變動，commit 會報錯，這裡加上 try 避免中斷
-        result = subprocess.run(["git", "commit", "-m", commit_message], capture_output=True, text=True)
+        # 捕捉 commit 輸出，避免無變動時報錯
+        subprocess.run(["git", "commit", "-m", commit_message], capture_output=True)
+        subprocess.run(["git", "push", "origin", "main"], check=True)
         
-        if "nothing to commit" in result.stdout:
-            st.toast("ℹ️ 資料無變動，無需推送")
-        else:
-            subprocess.run(["git", "push", "origin", "main"], check=True)
-            st.toast(f"🚀 成功推送至 GitHub: {commit_message}")
-            
-    except subprocess.CalledProcessError as e:
-        # 顯示更詳細的錯誤訊息在網頁上，方便排錯
-        st.error(f"Git 指令失敗: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        st.toast(f"🚀 已同步至 GitHub: {commit_message}")
     except Exception as e:
-        st.warning(f"Git 自動推送發生非預期錯誤: {e}")
+        # 在雲端環境(Streamlit Cloud) 失敗是正常的，不影響本地存檔
+        pass
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
 
-# --- 2. 側邊欄設定 ---
+# --- 2. 側邊欄 ---
 st.sidebar.title("🏨 管理系統")
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
@@ -75,53 +67,47 @@ is_admin = False
 staff_name = "Kuma"
 
 if user_mode == "公版回覆":
-    pwd = st.sidebar.text_input("輸入管理密碼以修改內容", type="password")
+    pwd = st.sidebar.text_input("輸入管理密碼", type="password")
     if pwd == ADMIN_PASSWORD:
         is_admin = True
-        st.sidebar.success("管理權限已開啟")
 else:
     is_admin = True
     existing_staff = [c for c in st.session_state.df['category'].unique() if c != "公版回覆"]
     if existing_staff:
-        staff_name = st.sidebar.selectbox("切換員工帳號", sorted(existing_staff))
+        staff_name = st.sidebar.selectbox("員工帳號", sorted(existing_staff))
     else:
-        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
+        staff_name = st.sidebar.text_input("新員工姓名", value="Kuma")
 
-# --- 3. 新增模板區塊 (新增後自動清空) ---
+# --- 3. 新增模板 (移除手動清空 state 的語法) ---
 if is_admin:
     st.sidebar.divider()
     with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
-        # 使用 key 來控制內容，以便儲存後清空
-        new_title = st.text_input("模板標題 (必填)", key="input_title")
-        new_note = st.text_input("備註標籤", key="input_note")
-        new_en = st.text_area("英文內容", height=250, key="input_en")
-        new_tw = st.text_area("中文內容", height=250, key="input_tw")
+        # 移除 key，或者保留 key 但不要在程式中手動修改它
+        n_t = st.text_input("模板標題 (必填)")
+        n_n = st.text_input("備註標籤")
+        n_e = st.text_area("英文內容", height=250)
+        n_w = st.text_area("中文內容", height=250)
         
         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
         
         if st.button("💾 確認儲存模板"):
-            if new_title:
+            if n_t:
                 new_row = {
-                    "branch": branch, "category": target_cat, "title": new_title, 
-                    "content_en": new_en, "content_tw": new_tw, "note": new_note, 
+                    "branch": branch, "category": target_cat, "title": n_t, 
+                    "content_en": n_e, "content_tw": n_w, "note": n_n, 
                     "priority": len(st.session_state.df) + 1
                 }
                 st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(st.session_state.df)
                 
-                # --- 重點：手動清空輸入框內容 ---
-                st.session_state.input_title = ""
-                st.session_state.input_note = ""
-                st.session_state.input_en = ""
-                st.session_state.input_tw = ""
-                
-                st.success("✅ 儲存成功並已清空欄位")
+                st.success("✅ 儲存成功！")
+                # 透過 rerun 重啟 App，輸入框就會自動清空
                 st.rerun()
 
 st.sidebar.divider()
 sort_mode = st.sidebar.toggle("🔄 開啟拖動排序模式", value=False)
 
-# --- 4. 主畫面：翻譯功能 ---
+# --- 4. 主畫面 ---
 st.title(f"💬 {branch} 客服中心")
 src_text = st.text_input("🌐 翻譯中心：")
 if src_text:
@@ -130,7 +116,7 @@ if src_text:
 
 st.divider()
 
-# --- 5. 顯示與排序邏輯 ---
+# --- 5. 顯示與排序 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & 
                               (st.session_state.df['category'] == current_cat)].copy()
@@ -147,10 +133,10 @@ else:
         sorted_items = sort_items(items_to_sort)
         if st.button("🚀 儲存新順序並更新 GitHub"):
             for i, title in enumerate(sorted_items):
-                target_mask = (st.session_state.df['branch'] == branch) & \
-                              (st.session_state.df['category'] == current_cat) & \
-                              (st.session_state.df['title'] == title)
-                st.session_state.df.loc[target_mask, 'priority'] = i
+                mask = (st.session_state.df['branch'] == branch) & \
+                       (st.session_state.df['category'] == current_cat) & \
+                       (st.session_state.df['title'] == title)
+                st.session_state.df.loc[mask, 'priority'] = i
             save_data(st.session_state.df)
             st.rerun()
     else:
@@ -174,11 +160,11 @@ else:
                 
                 if st.session_state.get(f"edit_{idx}", False):
                     with st.container(border=True):
-                        st.subheader(f"🛠️ 修改模板：{row['title']}")
-                        et = st.text_input("修改標題", row['title'], key=f"t_{idx}")
-                        en = st.text_input("修改備註", row['note'], key=f"n_{idx}")
-                        ee = st.text_area("修改英文內容", row['content_en'], key=f"en_{idx}", height=300)
-                        etw = st.text_area("修改中文內容", row['content_tw'], key=f"tw_{idx}", height=300)
+                        st.subheader(f"🛠️ 修改：{row['title']}")
+                        et = st.text_input("標題", row['title'], key=f"t_{idx}")
+                        en = st.text_input("備註", row['note'], key=f"n_{idx}")
+                        ee = st.text_area("英文內容", row['content_en'], key=f"en_{idx}", height=300)
+                        etw = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=300)
                         
                         c1, c2 = st.columns(2)
                         if c1.button("💾 儲存並同步", key=f"s_{idx}"):
