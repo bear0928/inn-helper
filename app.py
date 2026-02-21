@@ -17,6 +17,7 @@ st.markdown("""
 ADMIN_PASSWORD = "000000" 
 CSV_FILE = 'templates.csv'
 
+# --- 1. 資料處理函數 ---
 def load_data():
     if os.path.exists(CSV_FILE):
         try:
@@ -32,6 +33,7 @@ def load_data():
         return pd.DataFrame(columns=["branch", "category", "title", "content_en", "content_tw", "note", "priority"])
 
 def save_data(df):
+    """確保將資料寫入 CSV 檔案"""
     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999)
     df = df.sort_values(by="priority")
     df.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
@@ -39,21 +41,29 @@ def save_data(df):
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
 
-# --- 側邊欄 ---
+# --- 2. 側邊欄設定 ---
 st.sidebar.title("🏨 管理系統")
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
 
 is_admin = False
+staff_name = "Kuma" # 預設名稱
+
 if user_mode == "公版回覆":
     pwd = st.sidebar.text_input("輸入管理密碼以修改內容", type="password")
     if pwd == ADMIN_PASSWORD:
         is_admin = True
         st.sidebar.success("管理權限已開啟")
 else:
+    # 個人常用模式，密碼非強制，但預設開啟編輯權限
     is_admin = True
+    existing_staff = [c for c in st.session_state.df['category'].unique() if c != "公版回覆"]
+    if existing_staff:
+        staff_name = st.sidebar.selectbox("切換員工帳號", sorted(existing_staff))
+    else:
+        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
 
-# --- 1. 新增模板區塊 (放在側邊欄顯眼處) ---
+# --- 3. 新增模板區塊 ---
 if is_admin:
     st.sidebar.divider()
     with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
@@ -62,10 +72,6 @@ if is_admin:
         n_en = st.text_area("英文內容")
         n_tw = st.text_area("中文內容")
         
-        # 決定分類
-        staff_name = ""
-        if user_mode == "個人常用":
-            staff_name = st.text_input("員工姓名", value="Kuma")
         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
         
         if st.button("💾 確認儲存模板"):
@@ -73,17 +79,17 @@ if is_admin:
                 new_data = {
                     "branch": branch, "category": target_cat, "title": n_title, 
                     "content_en": n_en, "content_tw": n_tw, "note": n_note, 
-                    "priority": len(st.session_state.df) + 1 # 預設排最後
+                    "priority": len(st.session_state.df) + 1
                 }
                 st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([new_data])], ignore_index=True)
                 save_data(st.session_state.df)
-                st.success("✅ 已成功寫入 CSV！")
+                st.success(f"✅ 已成功存入 {target_cat}！")
                 st.rerun()
 
 st.sidebar.divider()
 sort_mode = st.sidebar.toggle("🔄 開啟拖動排序模式", value=False)
 
-# --- 主畫面 ---
+# --- 4. 主畫面：翻譯功能 ---
 st.title(f"💬 {branch} 客服中心")
 src_text = st.text_input("🌐 翻譯中心 (輸入任何語言自動轉中文)：")
 if src_text:
@@ -92,46 +98,40 @@ if src_text:
 
 st.divider()
 
-# --- 2. 顯示與排序邏輯 ---
-current_staff = "公版回覆"
-if user_mode == "個人常用":
-    # 這裡可以篩選個人分類，簡單起見先列出非公版內容
-    current_staff = "個人常用" # 或根據你的邏輯調整
-
-mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == ("公版回覆" if user_mode == "公版回覆" else st.session_state.get('last_staff', '個人常用')))
-# (為了簡化，如果是個人常用，建議你還是讓員工選一下名字)
-
-view_df = st.session_state.df[st.session_state.df['branch'] == branch]
+# --- 5. 顯示與排序邏輯 ---
+# 根據當前選擇過濾資料
 if user_mode == "公版回覆":
-    view_df = view_df[view_df['category'] == "公版回覆"]
+    view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & 
+                                  (st.session_state.df['category'] == "公版回覆")]
 else:
-    # 個人專區顯示邏輯
-    u_list = [c for c in st.session_state.df['category'].unique() if c != "公版回覆"]
-    if u_list:
-        sel_u = st.selectbox("選擇查看對象", u_list)
-        view_df = view_df[view_df['category'] == sel_u]
-    else:
-        st.info("目前尚無個人模板")
-        view_df = pd.DataFrame()
+    view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & 
+                                  (st.session_state.df['category'] == staff_name)]
 
-if not view_df.empty:
+if view_df.empty:
+    st.info(f"目前【{staff_name if user_mode == '個人常用' else '公版'}】尚無模板。")
+else:
+    # 確保排序正確
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values(by="priority")
 
     if sort_mode:
-        st.subheader("🖱️ 拖動標題調整順序 (排好後請按下方儲存)")
+        st.subheader("🖱️ 拖動標題調整順序")
         items_to_sort = view_df['title'].tolist()
         sorted_items = sort_items(items_to_sort)
         
         if st.button("🚀 儲存新順序並更新 CSV"):
             for i, title in enumerate(sorted_items):
-                # 精確匹配更新
-                st.session_state.df.loc[(st.session_state.df['branch'] == branch) & 
-                                        (st.session_state.df['title'] == title), 'priority'] = i
+                # 找出原始 df 中正確的那一筆進行更新
+                target_mask = (st.session_state.df['branch'] == branch) & \
+                              (st.session_state.df['category'] == ("公版回覆" if user_mode == "公版回覆" else staff_name)) & \
+                              (st.session_state.df['title'] == title)
+                st.session_state.df.loc[target_mask, 'priority'] = i
+            
             save_data(st.session_state.df)
             st.success("順序已寫入檔案！")
             st.rerun()
     else:
+        # 正常顯示模式
         for idx, row in view_df.iterrows():
             m_cols = st.columns([0.85, 0.15]) if is_admin else st.columns([1.0])
             with m_cols[0]:
