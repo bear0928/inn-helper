@@ -61,20 +61,23 @@ with st.sidebar.expander("➕ 新增模板"):
 # --- 4. 主畫面 ---
 st.title(f"💬 {branch} 客服小幫手")
 
-# --- 區塊 A：即時自動翻譯窗口 (永遠打開且無按鈕) ---
+# --- 區塊 A：即時翻譯窗口 (按 Enter 觸發) ---
 st.subheader("🌐 即時翻譯中心 (外語 → 繁中)")
-source_text = st.text_area("在此輸入或貼上顧客訊息，系統將自動翻譯：", height=120, placeholder="Paste guest message here...")
+# 改用 text_input，使用者貼上文字後按 Enter 即可翻譯
+source_text = st.text_input("在此貼上顧客訊息並按下 Enter：", placeholder="Paste guest message and press Enter...")
 
 if source_text:
     try:
-        # 只要輸入框有內容，即刻執行翻譯
         with st.spinner('Translating...'):
             translated_res = GoogleTranslator(source='auto', target='zh-TW').translate(source_text)
             st.info(f"**中文翻譯結果：**\n\n{translated_res}")
+            # 提供一個小按鈕清空輸入內容
+            if st.button("清空翻譯"):
+                st.rerun()
     except Exception as e:
-        st.error(f"翻譯發生錯誤，請稍後再試。")
+        st.error(f"翻譯發生錯誤，請檢查網路連線。")
 else:
-    st.caption("等待輸入中... (支援自動語言偵測)")
+    st.caption("等待輸入中... (支援多國語言自動偵測)")
 
 st.divider()
 
@@ -106,7 +109,7 @@ else:
                     st.code(row['content_tw'], language="text")
         
         with col_del:
-            if st.button("🗑️", key=f"del_{index}", help="刪除此模板"):
+            if st.button("🗑️", key=f"del_{index}"):
                 st.session_state.df = st.session_state.df.drop(index)
                 save_data(st.session_state.df)
                 st.rerun()
