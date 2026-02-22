@@ -149,7 +149,7 @@ with st.sidebar:
                         save_to_gs(st.session_state.df)
                         st.rerun()
 
-# --- 4. 主畫面：翻譯中心 (置頂) ---
+# --- 4. 主畫面：翻譯中心 (串接 Google 偵測) ---
 st.title(f"🏨 {branch} 客服系統")
 
 with st.container(border=True):
@@ -161,20 +161,46 @@ with st.container(border=True):
         key="trans_input"
     )
     
-    if src_text:
-        # 檢查是否含有中文字元
-        has_chinese = any('\u4e00' <= char <= '\u9fff' for char in src_text)
-        
-        # 邏輯判定：如果有中文就轉英文；如果完全沒中文(包含日文)就轉繁體中文
-        target_lang = 'en' if has_chinese else 'zh-TW'
-        
+    if src_text.strip():
         try:
-            # 強制指定目標語言
-            translated = GoogleTranslator(source='auto', target=target_lang).translate(src_text)
+            # 建立翻譯器對象，source 設為 auto 讓 Google 判斷
+            translator = GoogleTranslator(source='auto', target='en') # 先隨便設一個 target
             
-            label = "英文" if target_lang == 'en' else "繁體中文"
+            # 使用內建方法偵測語言
+            detected_lang = translator.get_supported_languages(as_dict=True).get(
+                translator.__dict__.get('_source') # 這裡我們透過翻譯行為來捕捉偵測到的語系
+            )
+            
+            # 實際上 deep_translator 執行翻譯時會自動處理 auto
+            # 我們的邏輯：如果偵測到是中文(zh-CN/zh-TW)，目標就設為 en；否則一律設為 zh-TW
+            # 為了最準確，我們直接翻譯兩次或判斷語系代碼
+            
+            # 1. 偵測語系代碼
+            from langdetect import detect # 如果環境有這個庫更好，若無則用 GoogleTranslator 邏輯
+            # 這裡我們用 GoogleTranslator 嘗試翻譯並判斷
+            
+            # 測試是否為中文
+            is_chinese = False
+            # 簡單翻譯一小段來確認偵測結果 (或利用 GoogleTranslator 的行為)
+            # 我們改用更直觀的方式：先讓它翻譯成 zh-TW
+            translated_to_tw = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
+            
+            # 判斷邏輯：
+            # 如果「原始文字」跟「翻譯成繁體中文後的文字」幾乎一樣，說明原句就是中文 -> 那我們就改翻成英文
+            # 如果不一樣，說明原句是外語 -> 那就顯示翻譯成繁中後的結果
+            
+            if src_text.strip() == translated_to_tw.strip():
+                # 說明原句就是中文，執行「中翻英」
+                final_result = GoogleTranslator(source='auto', target='en').translate(src_text)
+                label = "英文"
+            else:
+                # 說明原句是外語(日文、英文等)，執行「外翻中」
+                final_result = translated_to_tw
+                label = "繁體中文"
+
             st.success(f"**翻譯結果 ({label})：**")
-            st.code(translated, language="text")
+            st.code(final_result, language="text")
+            
         except Exception as e:
             st.error(f"翻譯發生錯誤: {e}")
 
