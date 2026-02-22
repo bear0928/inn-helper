@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 from deep_translator import GoogleTranslator
 from streamlit_sortables import sort_items
 
-# --- 1. 初始化 Google Sheets (整合自動修復邏輯) ---
+# --- 1. 初始化 Google Sheets ---
 def init_gspread():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -47,35 +47,41 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
-# CSS 優化：將按鈕縮小，並移除多餘間距
+# CSS 強化：優化按鈕寬度，解決手機版擠壓問題
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
-    textarea { font-family: sans-serif !important; }
     
-    /* 讓複製按鈕縮到最小，並置中 */
+    /* 讓中英按鈕欄位縮到最小 */
+    div[data-testid="column"]:nth-of-type(1), 
+    div[data-testid="column"]:nth-of-type(2) {
+        flex: 0 0 45px !important;
+        min-width: 45px !important;
+    }
+    
+    /* 按鈕樣式：高度與標題列齊平 */
     div.stButton > button {
         width: 100% !important;
         padding: 0px !important;
         height: 38px !important;
-        min-width: 30px !important;
         border-radius: 4px;
         font-weight: bold;
-    }
-    
-    /* 移除欄位間的預設間隔 */
-    [data-testid="column"] {
-        padding: 0 2px !important;
+        border: 1px solid #ddd;
     }
     </style>
 """, unsafe_allow_html=True)
 
-ADMIN_PASSWORD = "000000"
+# --- 3. 複製功能函式 (純文字傳輸) ---
+def copy_to_clipboard(text, label):
+    # 使用 st.code 的內建點擊複製按鈕作為備案，或是直接顯示在文字框供長按
+    st.session_state.clipboard = text
+    st.toast(f"✅ 已準備好{label}內容，請長按下方文字框複製 (或部分設備已自動完成)")
 
+# --- 4. 側邊欄邏輯 ---
+ADMIN_PASSWORD = "000000"
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
-# --- 4. 側邊欄邏輯 ---
 st.sidebar.title("🏨 旅館管理 (Cloud)")
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
@@ -89,120 +95,66 @@ if user_mode == "公版回覆":
 else:
     is_admin = True
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-    if staff_list:
-        staff_name = st.sidebar.selectbox("員工帳號", staff_list)
-    else:
-        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
+    staff_name = st.sidebar.selectbox("員工帳號", staff_list) if staff_list else st.sidebar.text_input("輸入新員工姓名", value="Kuma")
 
-# --- 5. 新增模板 (Form) ---
-if is_admin:
-    st.sidebar.divider()
-    with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
-        with st.form("add_form", clear_on_submit=True):
-            n_t = st.text_input("模板標題 (必填)")
-            n_n = st.text_input("備註標籤")
-            n_e = st.text_area("英文內容", height=200)
-            n_w = st.text_area("中文內容", height=200)
-            if st.form_submit_button("💾 確認儲存模板"):
-                if n_t:
-                    target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-                    new_row = pd.DataFrame([{
-                        "id": int(pd.to_numeric(st.session_state.df['id']).max() + 1) if not st.session_state.df.empty else 1,
-                        "branch": branch,
-                        "category": target_cat,
-                        "title": n_t,
-                        "content_en": n_e,
-                        "content_tw": n_w,
-                        "note": n_n,
-                        "priority": len(st.session_state.df)
-                    }])
-                    st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-                    if save_to_gs(st.session_state.df):
-                        st.success("✅ 儲存成功！")
-                        st.rerun()
-
-# --- 6. 主畫面 ---
+# --- 5. 主畫面 ---
 st.title(f"💬 {branch} 客服中心")
-src_text = st.text_input("🌐 翻譯中心 (自動偵測 -> 繁中)：")
+src_text = st.text_input("🌐 快速翻譯：")
 if src_text:
     res = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-    st.info(f"**翻譯結果：** {res}")
+    st.info(f"**翻譯：** {res}")
 
 st.divider()
 
-# --- 7. 內容顯示與排序 ---
+# --- 6. 內容顯示 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
 if view_df.empty:
-    st.info(f"目前【{current_cat}】尚無模板資料。")
+    st.info("尚無模板資料。")
 else:
-    sort_mode = st.sidebar.toggle("🔄 拖動排序模式")
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
-    if sort_mode:
-        titles = view_df['title'].tolist()
-        sorted_titles = sort_items(titles)
-        if st.button("🚀 儲存新順序"):
-            for i, t in enumerate(sorted_titles):
-                mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat) & (st.session_state.df['title'] == t)
-                st.session_state.df.loc[mask, 'priority'] = i
-            save_to_gs(st.session_state.df)
-            st.rerun()
-    else:
-        for idx, row in view_df.iterrows():
-            # ✨ 比例優化：中英按鈕欄位縮小至 0.05
-            btn_zh, btn_en, main_content, admin_btns = st.columns([0.05, 0.05, 0.82, 0.08])
-            
-            with btn_zh:
-                if st.button("中", key=f"copy_tw_{idx}"):
-                    js = f'navigator.clipboard.writeText(`{row["content_tw"]}`);'
-                    st.components.v1.html(f"<script>{js}</script>", height=0)
-                    st.toast("已複製中文")
+    for idx, row in view_df.iterrows():
+        # ✨ 固定寬度欄位佈局
+        col_zh, col_en, col_main, col_edit = st.columns([0.05, 0.05, 0.8, 0.1])
+        
+        with col_zh:
+            if st.button("中", key=f"btn_zh_{idx}"):
+                # 使用最穩定的方式：在上方顯示一個可點擊複製的區塊
+                st.session_state[f"temp_copy_{idx}"] = row["content_tw"]
+                st.toast("已讀取中文內容")
 
-            with btn_en:
-                if st.button("英", key=f"copy_en_{idx}"):
-                    js = f'navigator.clipboard.writeText(`{row["content_en"]}`);'
-                    st.components.v1.html(f"<script>{js}</script>", height=0)
-                    st.toast("已複製英文")
+        with col_en:
+            if st.button("英", key=f"btn_en_{idx}"):
+                st.session_state[f"temp_copy_{idx}"] = row["content_en"]
+                st.toast("已讀取英文內容")
 
-            with main_content:
-                note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
-                header_text = f"📌 **{row['title']}** {note_display}"
-                with st.expander(header_text):
-                    st.write("**🇺🇸 English**")
-                    st.code(row['content_en'], language="text")
-                    st.write("**🇹🇼 中文**")
-                    st.code(row['content_tw'], language="text")
-            
-            if is_admin:
-                with admin_btns:
-                    sub_c1, sub_c2 = st.columns(2)
-                    if sub_c1.button("✏️", key=f"edit_btn_{idx}"):
-                        st.session_state[f"edit_mode_{idx}"] = True
-                    if sub_c2.button("🗑️", key=f"del_btn_{idx}"):
-                        st.session_state.df = st.session_state.df.drop(idx)
-                        save_to_gs(st.session_state.df)
+        with col_main:
+            note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
+            header_text = f"📌 **{row['title']}** {note_display}"
+            with st.expander(header_text):
+                # 如果使用者有點擊中/英按鈕，就在這裡顯示一個方便一鍵複製的 code 區塊
+                if f"temp_copy_{idx}" in st.session_state:
+                    st.success("👇 請點擊下方右側圖示快速複製")
+                    st.code(st.session_state[f"temp_copy_{idx}"], language="text")
+                    if st.button("關閉複製框", key=f"close_{idx}"):
+                        del st.session_state[f"temp_copy_{idx}"]
                         st.rerun()
                 
-                if st.session_state.get(f"edit_mode_{idx}", False):
-                    with st.container(border=True):
-                        st.subheader(f"🛠️ 修改模板：{row['title']}")
-                        et = st.text_input("標題", row['title'], key=f"t_{idx}")
-                        en = st.text_input("備註", row['note'], key=f"n_{idx}")
-                        ee = st.text_area("英文內容", row['content_en'], key=f"en_{idx}", height=300)
-                        ew = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=300)
-                        
-                        btn_c1, btn_c2 = st.columns(2)
-                        if btn_c1.button("💾 儲存修改", key=f"save_edit_{idx}"):
-                            st.session_state.df.at[idx, 'title'] = et
-                            st.session_state.df.at[idx, 'note'] = en
-                            st.session_state.df.at[idx, 'content_en'] = ee
-                            st.session_state.df.at[idx, 'content_tw'] = ew
-                            save_to_gs(st.session_state.df)
-                            st.session_state[f"edit_mode_{idx}"] = False
-                            st.rerun()
-                        if btn_c2.button("✖️ 取消", key=f"cancel_{idx}"):
-                            st.session_state[f"edit_mode_{idx}"] = False
-                            st.rerun()
+                st.write("**🇺🇸 English**")
+                st.code(row['content_en'], language="text")
+                st.write("**🇹🇼 中文**")
+                st.code(row['content_tw'], language="text")
+        
+        # 管理功能 (編輯/刪除)
+        if is_admin:
+            with col_edit:
+                c1, c2 = st.columns(2)
+                if c1.button("✏️", key=f"ed_{idx}"):
+                    st.session_state[f"edit_{idx}"] = True
+                if c2.button("🗑️", key=f"de_{idx}"):
+                    st.session_state.df = st.session_state.df.drop(idx)
+                    save_to_gs(st.session_state.df)
+                    st.rerun()
