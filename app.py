@@ -128,7 +128,6 @@ with st.sidebar:
                 if st.form_submit_button("💾 儲存項目", use_container_width=True):
                     if n_t:
                         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-                        # 自動計算 ID 與 Priority
                         next_id = int(st.session_state.df['id'].max()) + 1 if not st.session_state.df.empty else 1
                         current_max_p = st.session_state.df[st.session_state.df['branch'] == branch]['priority'].max()
                         next_p = int(current_max_p) + 1 if pd.notna(current_max_p) else 0
@@ -154,9 +153,7 @@ with st.container(border=True):
     )
     if src_text.strip():
         try:
-            # 內容比較法：先試轉繁中
             translated_to_tw = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-            # 如果翻譯後跟原文一樣，判定為中文 -> 轉英文
             if src_text.strip() == translated_to_tw.strip():
                 final_result = GoogleTranslator(source='auto', target='en').translate(src_text)
                 label = "英文"
@@ -218,15 +215,30 @@ if not view_df.empty:
                 ec1, ec2 = st.columns(2)
                 with ec1: et = st.text_input("標題", row['title'], key=f"t_{idx}")
                 with ec2: en = st.text_input("備註", row['note'], key=f"n_{idx}")
-                ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=120)
-                ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=120)
                 
+                # 內容高度增加至 240
+                ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=240)
+                ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=240)
+                
+                # 按鈕順序調整：儲存與關閉在上
+                eb1, eb2 = st.columns(2)
+                if eb1.button("💾 更新目前分館", key=f"save_{idx}", use_container_width=True, type="primary"):
+                    st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
+                    save_to_gs(st.session_state.df)
+                    st.session_state[f"edit_mode_{idx}"] = False
+                    st.rerun()
+                if eb2.button("✖️ 關閉", key=f"cancel_{idx}", use_container_width=True):
+                    st.session_state[f"edit_mode_{idx}"] = False
+                    st.rerun()
+                
+                st.divider()
+                
+                # 複製到其他館在下
                 st.caption("📋 **一鍵複製到其他分館**")
                 target_branches = [b for b in ALL_BRANCHES if b != branch]
                 cols_copy = st.columns(len(target_branches))
                 for i, target_b in enumerate(target_branches):
                     if cols_copy[i].button(f"🚀 複製到 {target_b}", key=f"cp_{idx}_{target_b}", use_container_width=True):
-                        # 複製時自動計算新 ID 與該館的最後排序
                         new_id = int(st.session_state.df['id'].max()) + 1
                         target_max_p = st.session_state.df[st.session_state.df['branch'] == target_b]['priority'].max()
                         new_p = int(target_max_p) + 1 if pd.notna(target_max_p) else 0
@@ -237,16 +249,5 @@ if not view_df.empty:
                         }])
                         st.session_state.df = pd.concat([st.session_state.df, copy_row], ignore_index=True)
                         save_to_gs(st.session_state.df)
-                
-                st.divider()
-                eb1, eb2 = st.columns(2)
-                if eb1.button("💾 更新目前分館", key=f"save_{idx}", use_container_width=True, type="primary"):
-                    st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
-                    save_to_gs(st.session_state.df)
-                    st.session_state[f"edit_mode_{idx}"] = False
-                    st.rerun()
-                if eb2.button("✖️ 關閉", key=f"cancel_{idx}", use_container_width=True):
-                    st.session_state[f"edit_mode_{idx}"] = False
-                    st.rerun()
 else:
     st.info("💡 目前尚無資料。")
