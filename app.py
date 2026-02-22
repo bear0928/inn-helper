@@ -9,16 +9,11 @@ from streamlit_sortables import sort_items
 def init_gspread():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        
-        # 從 st.secrets 讀取並強制修復 private_key 換行問題
         info = dict(st.secrets["gcp_service_account"])
         if "private_key" in info:
             info["private_key"] = info["private_key"].replace("\\n", "\n")
-        
         creds = Credentials.from_service_account_info(info, scopes=scope)
         client = gspread.authorize(creds)
-        
-        # 請確保這裡的名稱與你的 Google Sheet 檔案名稱完全一致
         SHEET_NAME = "InnHelperDB" 
         sh = client.open(SHEET_NAME)
         return sh.get_worksheet(0)
@@ -29,7 +24,6 @@ def init_gspread():
 worksheet = init_gspread()
 
 def get_gs_data():
-    """讀取雲端資料並轉換為 DataFrame"""
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
     cols = ["id", "branch", "category", "title", "content_en", "content_tw", "note", "priority"]
@@ -39,7 +33,6 @@ def get_gs_data():
     return df
 
 def save_to_gs(df):
-    """將 DataFrame 完整覆蓋回雲端"""
     try:
         df_clean = df.fillna("")
         data_to_save = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
@@ -54,18 +47,24 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
-# CSS 優化：確保代碼塊換行與按鈕樣式
+# CSS 優化：調整按鈕間距與對齊，並確保手機版按鈕不會過大
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
     textarea { font-family: sans-serif !important; }
-    div.stButton > button { width: 100%; border-radius: 5px; }
+    /* 讓按鈕高度與標題更整齊 */
+    div.stButton > button { 
+        width: 100%; 
+        padding: 2px 5px;
+        font-size: 14px;
+    }
+    /* 隱藏 HTML 元件的間距 */
+    iframe { display: block; }
     </style>
 """, unsafe_allow_html=True)
 
 ADMIN_PASSWORD = "000000"
 
-# --- 3. 讀取最新資料 ---
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
@@ -86,7 +85,7 @@ else:
     if staff_list:
         staff_name = st.sidebar.selectbox("員工帳號", staff_list)
     else:
-        staff_name = st.sidebar.text_input("輸入新員工姓名", value="")
+        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
 
 # --- 5. 新增模板 (Form) ---
 if is_admin:
@@ -97,7 +96,6 @@ if is_admin:
             n_n = st.text_input("備註標籤")
             n_e = st.text_area("英文內容", height=200)
             n_w = st.text_area("中文內容", height=200)
-            
             if st.form_submit_button("💾 確認儲存模板"):
                 if n_t:
                     target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
@@ -137,7 +135,6 @@ else:
     view_df = view_df.sort_values("priority")
 
     if sort_mode:
-        st.subheader("🖱️ 拖動標題調整順序")
         titles = view_df['title'].tolist()
         sorted_titles = sort_items(titles)
         if st.button("🚀 儲存新順序"):
@@ -148,39 +145,38 @@ else:
             st.rerun()
     else:
         for idx, row in view_df.iterrows():
-            col_main, col_admin = st.columns([0.85, 0.15])
-            with col_main:
-                # 標題加粗並使用 Emoji 分隔備註
+            # 建立四個欄位：[中按鈕, 英按鈕, 標題與展開, 管理按鈕]
+            # 比例：0.08, 0.08, 0.74, 0.1
+            btn_zh, btn_en, main_content, admin_btns = st.columns([0.08, 0.08, 0.74, 0.1])
+            
+            with btn_zh:
+                if st.button("中", key=f"copy_tw_{idx}"):
+                    js = f'navigator.clipboard.writeText(`{row["content_tw"]}`);'
+                    st.components.v1.html(f"<script>{js}</script>", height=0)
+                    st.toast("已複製中文")
+
+            with btn_en:
+                if st.button("英", key=f"copy_en_{idx}"):
+                    js = f'navigator.clipboard.writeText(`{row["content_en"]}`);'
+                    st.components.v1.html(f"<script>{js}</script>", height=0)
+                    st.toast("已複製英文")
+
+            with main_content:
                 note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
                 header_text = f"📌 **{row['title']}** {note_display}"
-                
                 with st.expander(header_text):
-                    # --- 快速複製按鈕區 ---
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button(f"📋 英", key=f"copy_en_{idx}"):
-                            # 透過 JavaScript 寫入剪貼簿
-                            js_code = f'navigator.clipboard.writeText(`{row["content_en"]}`);'
-                            st.components.v1.html(f"<script>{js_code}</script>", height=0)
-                            st.toast("已複製英文內容！")
-                    with c2:
-                        if st.button(f"📋 中", key=f"copy_tw_{idx}"):
-                            js_code = f'navigator.clipboard.writeText(`{row["content_tw"]}`);'
-                            st.components.v1.html(f"<script>{js_code}</script>", height=0)
-                            st.toast("已複製中文內容！")
-                    
-                    st.divider()
-                    
                     st.write("**🇺🇸 English**")
                     st.code(row['content_en'], language="text")
                     st.write("**🇹🇼 中文**")
                     st.code(row['content_tw'], language="text")
             
             if is_admin:
-                with col_admin:
-                    if st.button("✏️", key=f"edit_btn_{idx}"):
+                with admin_btns:
+                    # 使用小字體或 emoji 節省空間
+                    sub_c1, sub_c2 = st.columns(2)
+                    if sub_c1.button("✏️", key=f"edit_btn_{idx}"):
                         st.session_state[f"edit_mode_{idx}"] = True
-                    if st.button("🗑️", key=f"del_btn_{idx}"):
+                    if sub_c2.button("🗑️", key=f"del_btn_{idx}"):
                         st.session_state.df = st.session_state.df.drop(idx)
                         save_to_gs(st.session_state.df)
                         st.rerun()
