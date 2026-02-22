@@ -80,15 +80,13 @@ components.html(
     """
     <script>
     const doc = window.parent.document;
-    const buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
-    const textareas = doc.querySelectorAll('textarea');
     
     // 監聽鍵盤事件
     doc.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'TEXTAREA' && e.key === 'Enter') {
             if (!e.shiftKey) {
                 e.preventDefault();
-                // 模擬點擊 Streamlit 的運算觸發 (透過 blur 觸發)
+                // 模擬點擊以觸發 Streamlit 的重新渲染 (透過 blur 觸發)
                 e.target.blur();
                 setTimeout(() => e.target.focus(), 100);
             }
@@ -128,7 +126,10 @@ with st.sidebar:
     else:
         is_admin = True
         staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-        staff_name = st.selectbox("切換個人帳號", staff_list) if staff_list else st.text_input("建立新帳號", value="Kuma")
+        if staff_list:
+            staff_name = st.selectbox("切換個人帳號", staff_list)
+        else:
+            staff_name = st.text_input("建立新帳號", value="Kuma")
 
     if is_admin:
         st.divider()
@@ -142,7 +143,11 @@ with st.sidebar:
                 if st.form_submit_button("💾 儲存項目", use_container_width=True):
                     if n_t:
                         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-                        new_row = pd.DataFrame([{"id": 999, "branch": branch, "category": target_cat, "title": n_t, "content_en": n_e, "content_tw": n_w, "note": n_n, "priority": 999}])
+                        new_row = pd.DataFrame([{
+                            "id": 999, "branch": branch, "category": target_cat, 
+                            "title": n_t, "content_en": n_e, "content_tw": n_w, 
+                            "note": n_n, "priority": 999
+                        }])
                         st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
                         save_to_gs(st.session_state.df)
                         st.rerun()
@@ -152,20 +157,25 @@ st.title(f"🏨 {branch} 客服系統")
 
 with st.container(border=True):
     st.subheader("🌐 雙向翻譯中心")
-    # 高度增加到 200px (現在的一倍)，並加入 Enter 說明
     src_text = st.text_area(
         "輸入內容 (Enter 翻譯 / Shift+Enter 換行)：", 
-        placeholder="輸入英文 → 轉中文 | 輸入中文 → 轉英文", 
+        placeholder="輸入外語 → 轉繁體中文 | 輸入中文 → 轉英文", 
         height=200,
         key="trans_input"
     )
+    
     if src_text:
-        is_chinese = any('\u4e00' <= char <= '\u9fff' for char in src_text)
-        target_lang = 'en' if is_chinese else 'zh-TW'
+        # 偵測是否包含中文字元
+        has_chinese = any('\u4e00' <= char <= '\u9fff' for char in src_text)
+        
+        # 邏輯：有中文就轉英文，沒中文就轉繁體中文
+        target_lang = 'en' if has_chinese else 'zh-TW'
         
         try:
             translated = GoogleTranslator(source='auto', target=target_lang).translate(src_text)
-            st.success(f"**翻譯結果 ({'英文' if target_lang=='en' else '繁體中文'})：**")
+            
+            label = "英文" if target_lang == 'en' else "繁體中文"
+            st.success(f"**翻譯結果 ({label})：**")
             st.code(translated, language="text")
         except Exception as e:
             st.error(f"翻譯發生錯誤: {e}")
