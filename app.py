@@ -26,7 +26,7 @@ worksheet = init_gspread()
 def get_gs_data():
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
-    # 移除 color，僅保留核心欄位
+    # 核心欄位，移除 color
     cols = ["id", "branch", "category", "title", "content_en", "content_tw", "note", "priority"]
     for col in cols:
         if col not in df.columns: 
@@ -52,7 +52,7 @@ st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem; max-width: 100% !important; }
     
-    /* 統一方框外觀：白色背景，灰色邊框 */
+    /* 模式 A：方框按鈕樣式 */
     div.stButton > button {
         width: 100% !important;
         height: 110px !important;
@@ -76,6 +76,22 @@ st.markdown("""
         transform: scale(1.02);
         box-shadow: 4px 4px 10px rgba(0,0,0,0.1) !important;
         border-color: #ff4b4b !important;
+    }
+
+    /* 強制排序模式下的項目佔滿全寬 */
+    div[data-testid="stVerticalBlock"] > div:has(.st-emotion-cache-1vt4581) { 
+        width: 100% !important; 
+    }
+    .st-emotion-cache-1vt4581 {
+        display: block !important;
+        width: 100% !important;
+        margin-bottom: 10px !important;
+        padding: 15px !important;
+        text-align: left !important;
+        font-size: 16px !important;
+        background-color: #f8f9fa !important;
+        border-radius: 8px !important;
+        border: 1px solid #eee !important;
     }
     
     div[data-testid="stMarkdownContainer"] pre {
@@ -121,7 +137,7 @@ else:
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
     staff_name = st.sidebar.selectbox("員工帳號", staff_list) if staff_list else st.sidebar.text_input("新帳號", value="Kuma")
 
-# --- 5. 側邊欄操作 ---
+# --- 5. 側邊欄：新增模板 ---
 if is_admin:
     with st.sidebar:
         st.divider()
@@ -141,14 +157,14 @@ if is_admin:
                         st.rerun()
 
 # --- 6. 翻譯中心 ---
-src_text = st.text_input("🌐 翻譯中心：", placeholder="在此貼上訊息...")
+src_text = st.text_input("🌐 翻譯中心 (自動偵測 -> 繁中)：", placeholder="在此貼上訊息...")
 if src_text:
     translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
     st.code(translated, language="text")
 
 st.divider()
 
-# --- 7. 內容顯示與操作邏輯 ---
+# --- 7. 內容顯示與拖拽排序 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -156,39 +172,14 @@ if not view_df.empty:
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
-    # 拖拽排序
-    # ✨ 拖拽排序介面 (優化為全寬列表樣式)
+    # ↕️ 拖拽排序模式 (佔滿全寬列表)
     if is_admin and sort_mode:
         st.info("💡 請直接「上下拖拽」標籤來調整順序，完成後點擊下方儲存。")
-        
-        # 注入 CSS 讓 sort_items 的每個標籤佔滿全寬
-        st.markdown("""
-            <style>
-            /* 針對拖拽組件的內層元件強制 100% 寬度 */
-            div[data-testid="stVerticalBlock"] > div:has(.st-emotion-cache-1vt4581) { 
-                width: 100% !important; 
-            }
-            /* 讓每一個可拖動的項目變成一整列 */
-            .st-emotion-cache-1vt4581 {
-                display: block !important;
-                width: 100% !important;
-                margin-bottom: 8px !important;
-                padding: 12px !important;
-                text-align: left !important;
-                font-size: 16px !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-
         titles = view_df['title'].tolist()
-        
-        # 顯示拖拽組件
-        # direction="vertical" 配合 CSS 強制讓它變成垂直列表
         sorted_titles = sort_items(titles, key="drag_sort_list")
         
         st.markdown("---")
         if st.button("💾 儲存全新排序順序", use_container_width=True, type="primary"):
-            # 根據拖拽後的標題順序更新 priority
             for i, t in enumerate(sorted_titles):
                 st.session_state.df.loc[(st.session_state.df['title'] == t) & 
                                         (st.session_state.df['branch'] == branch) & 
@@ -219,40 +210,44 @@ if not view_df.empty:
                                     if c2.button("🗑️", key=f"d_v_{idx}"): 
                                         st.session_state.df = st.session_state.df.drop(idx); save_to_gs(st.session_state.df); st.rerun()
                         else:
+                            # 方框正下方的編輯區
                             with st.container(border=True):
                                 et = st.text_input("標題", row['title'], key=f"t_{idx}")
                                 en = st.text_input("備註", row['note'], key=f"n_{idx}")
-                                ee = st.text_area("英文", row['content_en'], key=f"ee_{idx}")
-                                ew = st.text_area("中文", row['content_tw'], key=f"ew_{idx}")
+                                ee = st.text_area("英文", row['content_en'], key=f"ee_{idx}", height=120)
+                                ew = st.text_area("中文", row['content_tw'], key=f"ew_{idx}", height=120)
                                 b1, b2 = st.columns(2)
-                                if b1.button("💾", key=f"s_{idx}"):
+                                if b1.button("💾 儲存", key=f"s_{idx}"):
                                     st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
                                     save_to_gs(st.session_state.df)
                                     st.session_state[f"edit_{idx}"] = False; st.rerun()
-                                if b2.button("✖️", key=f"c_{idx}"):
+                                if b2.button("✖️ 取消", key=f"c_{idx}"):
                                     st.session_state[f"edit_{idx}"] = False; st.rerun()
 
-    # 📜 模式 B：清單模式
+    # 📜 模式 B：清單模式 (下拉 Expand)
     else:
         for idx, row in view_df.iterrows():
             col_l1, col_l2, col_l3 = st.columns([0.86, 0.07, 0.07])
             with col_l1:
-                with st.expander(f"**{row['title']}** {'｜ '+row['note'] if row['note'] else ''}"):
+                with st.expander(f"📌 **{row['title']}** {' ｜ 🏷️ '+row['note'] if row['note'] else ''}"):
                     st.code(row['content_en'], language="text")
                     st.code(row['content_tw'], language="text")
             if is_admin:
                 with col_l2:
                     if st.button("✏️", key=f"ed_l_{idx}"): st.session_state[f"edit_{idx}"] = True; st.rerun()
                 with col_l3:
-                    if st.button("🗑️", key=f"de_l_{idx}"): st.session_state.df = st.session_state.df.drop(idx); save_to_gs(st.session_state.df); st.rerun()
+                    if st.button("🗑️", key=f"de_l_{idx}"): 
+                        st.session_state.df = st.session_state.df.drop(idx); save_to_gs(st.session_state.df); st.rerun()
             
+            # 清單正下方的編輯區
             if st.session_state.get(f"edit_{idx}", False):
                 with st.container(border=True):
+                    st.markdown(f"🛠️ **正在編輯：{row['title']}**")
                     c1, c2 = st.columns(2)
-                    with c1: et = st.text_input("標題", row['title'], key=f"lt_{idx}")
-                    with c2: en = st.text_input("備註", row['note'], key=f"ln_{idx}")
-                    ee = st.text_area("英文", row['content_en'], key=f"lee_{idx}")
-                    ew = st.text_area("中文", row['content_tw'], key=f"lew_{idx}")
+                    with c1: et = st.text_input("修改標題", row['title'], key=f"lt_{idx}")
+                    with c2: en = st.text_input("修改備註", row['note'], key=f"ln_{idx}")
+                    ee = st.text_area("編輯英文", row['content_en'], key=f"lee_{idx}", height=150)
+                    ew = st.text_area("編輯中文", row['content_tw'], key=f"lew_{idx}", height=150)
                     b1, b2 = st.columns(2)
                     if b1.button("💾 儲存修改", key=f"ls_{idx}"):
                         st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
