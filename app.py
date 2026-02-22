@@ -47,32 +47,32 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
-# ✨ CSS 優化：定義固定高度且可滾動的文字區塊
+# ✨ 重點 CSS：強制縮短 st.code 複製框的高度並加上滾動條
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; max-width: 100% !important; }
     .stExpander { width: 100% !important; }
     
-    /* 自定義滾動文字區塊 (無複製框背景) */
-    .scroll-box {
-        height: 200px; /* 固定高度 */
-        overflow-y: auto; /* 垂直滾動 */
-        padding: 15px;
-        background-color: #fcfcfc; /* 極淺灰背景，區隔內容 */
-        border: 1px solid #eee;
-        border-radius: 8px;
-        white-space: pre-wrap; /* 保留換行 */
-        font-family: sans-serif;
-        line-height: 1.6;
-        color: #333;
+    /* 針對 st.code 的容器進行限高 */
+    div[data-testid="stMarkdownContainer"] pre {
+        max-height: 180px !important; /* 固定高度，超過就滾動 */
+        overflow-y: auto !important;
+        border: 1px solid #ddd !important;
     }
+    
+    /* 確保複製按鈕位置正確 */
+    div[data-testid="stCodeBlock"] button {
+        background-color: rgba(255, 255, 255, 0.8) !important;
+    }
+
+    code { white-space: pre-wrap !important; word-break: break-word !important; }
     </style>
 """, unsafe_allow_html=True)
 
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
-# --- 4. 側邊欄與翻譯中心 (略，維持原樣) ---
+# --- 4. 側邊欄與翻譯中心 (自動偵測) ---
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
 is_admin = (st.sidebar.text_input("管理密碼", type="password") == "000000") if user_mode == "公版回覆" else True
@@ -82,11 +82,11 @@ src_text = st.text_input("🌐 各國語言翻譯 (自動偵測 -> 繁中)：", 
 if src_text:
     translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
     st.info(f"**翻譯結果：**")
-    st.write(translated)
+    st.code(translated, language="text") # 翻譯結果也使用帶有一鍵複製的框
 
 st.divider()
 
-# --- 7. 內容顯示 ---
+# --- 5. 內容顯示 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else "Kuma"
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -101,14 +101,13 @@ if not view_df.empty:
             header_text = f"📌 **{row['title']}** {note_display}"
             
             with st.expander(header_text):
-                # 使用 HTML渲染固定高度的滾動視窗
-                st.markdown("**🇺🇸 English Content**")
-                st.markdown(f'<div class="scroll-box">{row["content_en"]}</div>', unsafe_allow_html=True)
+                # 直接使用原生的 st.code，它自帶一鍵複製按鈕
+                # 搭配上方的 CSS，它會自動變成「固定高度 + 可滾動」
+                st.write("**🇺🇸 English**")
+                st.code(row['content_en'], language="text")
                 
-                st.markdown("**🇹🇼 中文內容**")
-                st.markdown(f'<div class="scroll-box">{row["content_tw"]}</div>', unsafe_allow_html=True)
-                
-                st.caption("💡 內容過長時，請在框內滑動滾輪查看完整文字")
+                st.write("**🇹🇼 中文**")
+                st.code(row['content_tw'], language="text")
         
         if is_admin:
             with col2:
