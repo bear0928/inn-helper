@@ -49,8 +49,8 @@ st.set_page_config(page_title="旅館客服管理系統", layout="wide")
 
 st.markdown("""
     <style>
-    /* 主容器與寬度調整 */
-    .block-container { padding-top: 2rem; max-height: 100vh; }
+    /* 主容器 */
+    .block-container { padding-top: 1.5rem; }
     
     /* 側邊欄拖拽項目全寬樣式 */
     [data-testid="stSidebar"] div:has(.st-emotion-cache-1vt4581) { 
@@ -61,17 +61,15 @@ st.markdown("""
         width: 100% !important;
         margin-bottom: 6px !important;
         padding: 10px !important;
-        font-size: 14px !important;
         background-color: #ffffff !important;
         border: 1px solid #ddd !important;
         border-radius: 6px !important;
-        color: #333 !important;
+        font-size: 14px !important;
     }
 
-    /* 程式碼區塊樣式 */
+    /* 程式碼區塊樣式優化 */
     div[data-testid="stMarkdownContainer"] pre {
-        background-color: #f9f9f9 !important;
-        border: 1px solid #eee !important;
+        background-color: #f1f3f4 !important;
         border-radius: 8px !important;
     }
     </style>
@@ -82,22 +80,19 @@ if 'df' not in st.session_state:
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# --- 3. 頂部選擇區 ---
-st.title("🏨 旅館客服管理系統")
-c_ui1, c_ui2 = st.columns([0.5, 0.5])
-with c_ui1:
-    branch = st.pills("📍 選擇分館", ["喜園館", "中華館", "長沙館"], default="喜園館")
-with c_ui2:
-    user_mode = st.pills("🔑 運作模式", ["公版回覆", "個人常用"], default="公版回覆")
-
-st.divider()
-
-# --- 4. 權限管理與側邊欄控制 ---
-is_admin = False
-staff_name = "Kuma"
-
+# --- 3. 側邊欄：全局控制中心 ---
 with st.sidebar:
-    st.header("⚙️ 管理與排序")
+    st.header("🏨 系統控制台")
+    
+    # --- 搬移過來的：分館與模式 ---
+    branch = st.radio("📍 選擇分館", ["喜園館", "中華館", "長沙館"], index=0)
+    user_mode = st.segmented_control("🔑 運作模式", ["公版回覆", "個人常用"], default="公版回覆")
+    
+    st.divider()
+    
+    # 權限與管理邏輯
+    is_admin = False
+    staff_name = "Kuma"
     
     if user_mode == "公版回覆":
         if not st.session_state.authenticated:
@@ -105,32 +100,29 @@ with st.sidebar:
             if pwd == "000000":
                 st.session_state.authenticated = True
                 st.rerun()
-            st.warning("請輸入密碼以開啟管理功能")
+            st.warning("🔒 需密碼以開啟編輯與排序")
         else:
             is_admin = True
-            if st.button("🔓 登出管理員"):
+            if st.button("🔓 登出管理員", use_container_width=True):
                 st.session_state.authenticated = False
                 st.rerun()
     else:
-        # 個人常用模式預設開啟管理功能
         is_admin = True
         staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-        staff_name = st.selectbox("切換員工帳號", staff_list) if staff_list else st.text_input("建立新帳號", value="Kuma")
+        staff_name = st.selectbox("切換帳號", staff_list) if staff_list else st.text_input("建立新帳號", value="Kuma")
 
-    # --- 側邊欄：功能選單 ---
+    # 管理功能
     if is_admin:
         st.divider()
-        # 排序功能
-        sort_mode = st.toggle("↕️ 開啟拖拽排序")
+        sort_mode = st.toggle("↕️ 開啟拖拽排序模式")
         
-        # 新增功能
         with st.expander("➕ 新增回覆模板"):
             with st.form("add_form", clear_on_submit=True):
                 n_t = st.text_input("標題")
-                n_n = st.text_input("備註 (選填)")
+                n_n = st.text_input("備註")
                 n_e = st.text_area("英文內容")
                 n_w = st.text_area("中文內容")
-                if st.form_submit_button("💾 儲存項目"):
+                if st.form_submit_button("💾 儲存項目", use_container_width=True):
                     if n_t:
                         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
                         new_row = pd.DataFrame([{"id": 999, "branch": branch, "category": target_cat, "title": n_t, "content_en": n_e, "content_tw": n_w, "note": n_n, "priority": 999}])
@@ -138,7 +130,10 @@ with st.sidebar:
                         save_to_gs(st.session_state.df)
                         st.rerun()
 
-# --- 5. 翻譯中心 (主畫面) ---
+# --- 4. 主畫面：翻譯與內容 ---
+st.title("旅館客服管理系統")
+
+# 翻譯中心
 src_text = st.text_input("🌐 翻譯中心 (自動偵測 → 繁中)：", placeholder="在此貼上客人訊息...")
 if src_text:
     translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
@@ -146,7 +141,7 @@ if src_text:
 
 st.divider()
 
-# --- 6. 主內容區：清單顯示與操作 ---
+# 獲取資料
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -154,22 +149,21 @@ if not view_df.empty:
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
-    # ↕️ 側邊欄拖拽排序邏輯
+    # 側邊欄拖拽排序邏輯
     if is_admin and sort_mode:
         with st.sidebar:
-            st.subheader("拖拽項目調整順序")
+            st.subheader("↕️ 拖拽排序")
             titles = view_df['title'].tolist()
             sorted_titles = sort_items(titles, key="drag_sort_list")
-            if st.button("💾 儲存排序", use_container_width=True, type="primary"):
+            if st.button("💾 儲存全新排序", use_container_width=True, type="primary"):
                 for i, t in enumerate(sorted_titles):
                     st.session_state.df.loc[(st.session_state.df['title'] == t) & 
                                             (st.session_state.df['branch'] == branch) & 
                                             (st.session_state.df['category'] == current_cat), 'priority'] = i
                 save_to_gs(st.session_state.df)
                 st.rerun()
-            st.info("調整完後請務必點擊儲存按鈕。")
-    
-    # 📜 主畫面：清單呈現
+
+    # 主畫面清單
     for idx, row in view_df.iterrows():
         col_main, col_edit, col_del = st.columns([0.88, 0.06, 0.06])
         
@@ -178,7 +172,7 @@ if not view_df.empty:
             if row['note']: title_display += f" ｜ 🏷️ {row['note']}"
             
             with st.expander(title_display):
-                st.caption("🇺🇸 English (點擊下方即可複製)")
+                st.caption("🇺🇸 English")
                 st.code(row['content_en'], language="text")
                 st.caption("🇹🇼 中文")
                 st.code(row['content_tw'], language="text")
@@ -194,18 +188,18 @@ if not view_df.empty:
                     save_to_gs(st.session_state.df)
                     st.rerun()
         
-        # 原地編輯區塊
+        # 原地編輯表單
         if st.session_state.get(f"edit_mode_{idx}", False):
             with st.container(border=True):
-                st.write(f"🔧 **編輯中：{row['title']}**")
+                st.write(f"🔧 **編輯項目**")
                 ec1, ec2 = st.columns(2)
-                with ec1: et = st.text_input("修改標題", row['title'], key=f"t_{idx}")
-                with ec2: en = st.text_input("修改備註", row['note'], key=f"n_{idx}")
-                ee = st.text_area("編輯英文內容", row['content_en'], key=f"ee_{idx}", height=150)
-                ew = st.text_area("編輯中文內容", row['content_tw'], key=f"ew_{idx}", height=150)
+                with ec1: et = st.text_input("標題", row['title'], key=f"t_{idx}")
+                with ec2: en = st.text_input("備註", row['note'], key=f"n_{idx}")
+                ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=120)
+                ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=120)
                 
                 eb1, eb2 = st.columns(2)
-                if eb1.button("💾 確認更新", key=f"save_{idx}", use_container_width=True):
+                if eb1.button("💾 儲存", key=f"save_{idx}", use_container_width=True):
                     st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
                     save_to_gs(st.session_state.df)
                     st.session_state[f"edit_mode_{idx}"] = False
@@ -214,4 +208,4 @@ if not view_df.empty:
                     st.session_state[f"edit_mode_{idx}"] = False
                     st.rerun()
 else:
-    st.info("💡 目前此分類尚無資料。請使用左側邊欄的「新增回覆模板」功能開始建立。")
+    st.info("💡 目前尚無資料。")
