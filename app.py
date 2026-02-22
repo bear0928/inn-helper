@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from deep_translator import GoogleTranslator
 from streamlit_sortables import sort_items
+import streamlit.components.v1 as components
 
 # --- 1. 初始化 Google Sheets ---
 def init_gspread():
@@ -49,10 +50,9 @@ st.set_page_config(page_title="旅館客服管理系統", layout="wide")
 
 st.markdown("""
     <style>
-    /* 主容器 */
     .block-container { padding-top: 1.5rem; }
     
-    /* 側邊欄拖拽項目全寬樣式 */
+    /* 側邊欄拖拽項目全寬 */
     [data-testid="stSidebar"] div:has(.st-emotion-cache-1vt4581) { 
         width: 100% !important; 
     }
@@ -68,14 +68,36 @@ st.markdown("""
         color: #333 !important;
     }
 
-    /* 程式碼區塊樣式 */
-    div[data-testid="stMarkdownContainer"] pre {
-        background-color: #f8f9fa !important;
-        border: 1px solid #eee !important;
-        border-radius: 8px !important;
+    /* 翻譯輸入框文字大小強化 */
+    div[data-testid="stTextArea"] textarea {
+        font-size: 18px !important;
     }
     </style>
 """, unsafe_allow_html=True)
+
+# 注入 JavaScript 處理 Enter 送出邏輯
+components.html(
+    """
+    <script>
+    const doc = window.parent.document;
+    const buttons = Array.from(doc.querySelectorAll('button[kind="secondary"]'));
+    const textareas = doc.querySelectorAll('textarea');
+    
+    // 監聽鍵盤事件
+    doc.addEventListener('keydown', function(e) {
+        if (e.target.tagName === 'TEXTAREA' && e.key === 'Enter') {
+            if (!e.shiftKey) {
+                e.preventDefault();
+                // 模擬點擊 Streamlit 的運算觸發 (透過 blur 觸發)
+                e.target.blur();
+                setTimeout(() => e.target.focus(), 100);
+            }
+        }
+    });
+    </script>
+    """,
+    height=0,
+)
 
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
@@ -85,14 +107,11 @@ if 'authenticated' not in st.session_state:
 # --- 3. 側邊欄：控制中心 ---
 with st.sidebar:
     st.header("⚙️ 系統控制")
-    
-    # 分館與模式選擇
     branch = st.radio("📍 選擇分館", ["喜園館", "中華館", "長沙館"], index=0)
     user_mode = st.segmented_control("🔑 運作模式", ["公版回覆", "個人常用"], default="公版回覆")
     
     st.divider()
     
-    # 權限與帳號管理
     is_admin = False
     staff_name = "Kuma"
     if user_mode == "公版回覆":
@@ -111,11 +130,9 @@ with st.sidebar:
         staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
         staff_name = st.selectbox("切換個人帳號", staff_list) if staff_list else st.text_input("建立新帳號", value="Kuma")
 
-    # 管理功能
     if is_admin:
         st.divider()
         sort_mode = st.toggle("↕️ 開啟拖拽排序模式")
-        
         with st.expander("➕ 新增回覆模板"):
             with st.form("add_form", clear_on_submit=True):
                 n_t = st.text_input("標題")
@@ -133,12 +150,16 @@ with st.sidebar:
 # --- 4. 主畫面：翻譯中心 (置頂) ---
 st.title(f"🏨 {branch} 客服系統")
 
-# ✨ 雙向智慧翻譯區塊
 with st.container(border=True):
     st.subheader("🌐 雙向翻譯中心")
-    src_text = st.text_area("輸入內容：", placeholder="輸入英文 → 轉中文 | 輸入中文 → 轉英文", height=100)
+    # 高度增加到 200px (現在的一倍)，並加入 Enter 說明
+    src_text = st.text_area(
+        "輸入內容 (Enter 翻譯 / Shift+Enter 換行)：", 
+        placeholder="輸入英文 → 轉中文 | 輸入中文 → 轉英文", 
+        height=200,
+        key="trans_input"
+    )
     if src_text:
-        # 偵測是否包含中文字符
         is_chinese = any('\u4e00' <= char <= '\u9fff' for char in src_text)
         target_lang = 'en' if is_chinese else 'zh-TW'
         
@@ -159,7 +180,6 @@ if not view_df.empty:
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
-    # 側邊欄拖拽排序邏輯
     if is_admin and sort_mode:
         with st.sidebar:
             st.subheader("↕️ 拖拽排序清單")
@@ -173,10 +193,8 @@ if not view_df.empty:
                 save_to_gs(st.session_state.df)
                 st.rerun()
 
-    # 顯示回覆清單
     for idx, row in view_df.iterrows():
         col_main, col_edit, col_del = st.columns([0.88, 0.06, 0.06])
-        
         with col_main:
             title_label = f"📌 **{row['title']}**"
             if row['note']: title_label += f" ｜ 🏷️ {row['note']}"
@@ -197,7 +215,6 @@ if not view_df.empty:
                     save_to_gs(st.session_state.df)
                     st.rerun()
         
-        # 編輯模式區塊
         if st.session_state.get(f"edit_mode_{idx}", False):
             with st.container(border=True):
                 st.write(f"🔧 **修改項目**")
@@ -206,7 +223,6 @@ if not view_df.empty:
                 with ec2: en = st.text_input("備註", row['note'], key=f"n_{idx}")
                 ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=120)
                 ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=120)
-                
                 eb1, eb2 = st.columns(2)
                 if eb1.button("💾 確認更新", key=f"save_{idx}", use_container_width=True):
                     st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
@@ -217,4 +233,4 @@ if not view_df.empty:
                     st.session_state[f"edit_mode_{idx}"] = False
                     st.rerun()
 else:
-    st.info("💡 目前此分館與類別下沒有資料。")
+    st.info("💡 目前尚無資料。")
