@@ -88,7 +88,7 @@ else:
     if staff_list:
         staff_name = st.sidebar.selectbox("員工帳號", staff_list)
     else:
-        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
+        staff_name = st.sidebar.text_input("輸入新員工姓名", value="")
 
 # --- 5. 新增模板 (Form) ---
 if is_admin:
