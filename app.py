@@ -67,7 +67,6 @@ st.markdown("""
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
-# 初始化登入狀態
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
@@ -81,31 +80,27 @@ staff_name = "Kuma"
 ADMIN_PASSWORD = "000000"
 
 if user_mode == "公版回覆":
-    # 如果尚未驗證成功，才顯示輸入框
     if not st.session_state.authenticated:
-        pwd = st.sidebar.text_input("管理密碼 (Enter 登入)", type="password")
+        pwd = st.sidebar.text_input("管理密碼", type="password")
         if pwd == ADMIN_PASSWORD:
             st.session_state.authenticated = True
-            st.rerun() # 立即重新整理以隱藏輸入框
-        elif pwd != "":
-            st.sidebar.error("密碼錯誤")
+            st.rerun()
     else:
         is_admin = True
         if st.sidebar.button("登出管理員"):
             st.session_state.authenticated = False
             st.rerun()
 else:
-    # 個人模式預設開啟編輯權限
     is_admin = True
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-    if staff_list:
-        staff_name = st.sidebar.selectbox("切換員工帳號", staff_list)
-    else:
-        staff_name = st.sidebar.text_input("建立新帳號", value="")
+    staff_name = st.sidebar.selectbox("切換員工帳號", staff_list) if staff_list else st.sidebar.text_input("建立新帳號", value="Kuma")
 
-# --- 4. 側邊欄：新增模板表單 ---
+# --- 4. 側邊欄：新增模板 & 排序開關 ---
 if is_admin:
     st.sidebar.divider()
+    # 排序模式開關
+    sort_mode = st.sidebar.toggle("🔄 開啟排序模式")
+    
     with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
         with st.form("add_form", clear_on_submit=True):
             n_t = st.text_input("模板標題 (必填)")
@@ -122,8 +117,8 @@ if is_admin:
                         "note": n_n, "priority": len(st.session_state.df)
                     }])
                     st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-                    if save_to_gs(st.session_state.df):
-                        st.rerun()
+                    save_to_gs(st.session_state.df)
+                    st.rerun()
 
 # --- 5. 主畫面：翻譯中心 ---
 st.title(f"💬 {branch} 客服中心")
@@ -135,57 +130,74 @@ if src_text:
 
 st.divider()
 
-# --- 6. 內容顯示與編輯邏輯 ---
+# --- 6. 內容顯示與排序邏輯 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
 if view_df.empty:
     st.info(f"目前【{current_cat}】尚無資料。")
 else:
+    # 依照優先權排序
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
-    for idx, row in view_df.iterrows():
-        # 標題列佈局
-        col1, col2, col3 = st.columns([0.86, 0.07, 0.07])
-        with col1:
-            note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
-            header_text = f"📌 **{row['title']}** {note_display}"
-            with st.expander(header_text):
-                st.write("**🇺🇸 English**")
-                st.code(row['content_en'], language="text")
-                st.write("**🇹🇼 中文**")
-                st.code(row['content_tw'], language="text")
+    # A. 排序模式：顯示可拖動清單
+    if is_admin and sort_mode:
+        st.subheader("🖱️ 拖動標題調整顯示順序")
+        titles = view_df['title'].tolist()
+        sorted_titles = sort_items(titles, direction='vertical', key="sort_list")
         
-        # 登入後的功能按鈕
-        if is_admin:
-            with col2:
-                if st.button("✏️", key=f"edit_btn_{idx}"):
-                    st.session_state[f"edit_mode_{idx}"] = True
-            with col3:
-                if st.button("🗑️", key=f"del_btn_{idx}"):
-                    st.session_state.df = st.session_state.df.drop(idx)
-                    save_to_gs(st.session_state.df)
+        if st.button("🚀 儲存新順序"):
+            with st.spinner('更新排序中...'):
+                for i, t in enumerate(sorted_titles):
+                    mask = (st.session_state.df['branch'] == branch) & \
+                           (st.session_state.df['category'] == current_cat) & \
+                           (st.session_state.df['title'] == t)
+                    st.session_state.df.loc[mask, 'priority'] = i
+                if save_to_gs(st.session_state.df):
                     st.rerun()
+
+    # B. 一般模式：顯示回覆內容
+    else:
+        for idx, row in view_df.iterrows():
+            col1, col2, col3 = st.columns([0.86, 0.07, 0.07])
+            with col1:
+                note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
+                header_text = f"📌 **{row['title']}** {note_display}"
+                with st.expander(header_text):
+                    st.write("**🇺🇸 English**")
+                    st.code(row['content_en'], language="text")
+                    st.write("**🇹🇼 中文**")
+                    st.code(row['content_tw'], language="text")
             
-            # 編輯介面
-            if st.session_state.get(f"edit_mode_{idx}", False):
-                with st.container(border=True):
-                    st.markdown(f"🛠️ **修改模板：{row['title']}**")
-                    et = st.text_input("標題", row['title'], key=f"t_{idx}")
-                    en = st.text_input("備註", row['note'], key=f"n_{idx}")
-                    ee = st.text_area("英文內容", row['content_en'], key=f"en_{idx}", height=250)
-                    ew = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=250)
-                    
-                    ec1, ec2 = st.columns(2)
-                    if ec1.button("💾 儲存修改", key=f"save_edit_{idx}"):
-                        st.session_state.df.at[idx, 'title'] = et
-                        st.session_state.df.at[idx, 'note'] = en
-                        st.session_state.df.at[idx, 'content_en'] = ee
-                        st.session_state.df.at[idx, 'content_tw'] = ew
-                        if save_to_gs(st.session_state.df):
+            if is_admin:
+                with col2:
+                    if st.button("✏️", key=f"edit_btn_{idx}"):
+                        st.session_state[f"edit_mode_{idx}"] = True
+                with col3:
+                    if st.button("🗑️", key=f"del_btn_{idx}"):
+                        st.session_state.df = st.session_state.df.drop(idx)
+                        save_to_gs(st.session_state.df)
+                        st.rerun()
+                
+                # 編輯介面
+                if st.session_state.get(f"edit_mode_{idx}", False):
+                    with st.container(border=True):
+                        st.markdown(f"🛠️ **修改模板：{row['title']}**")
+                        et = st.text_input("標題", row['title'], key=f"t_{idx}")
+                        en = st.text_input("備註", row['note'], key=f"n_{idx}")
+                        ee = st.text_area("英文內容", row['content_en'], key=f"en_{idx}", height=250)
+                        ew = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=250)
+                        
+                        ec1, ec2 = st.columns(2)
+                        if ec1.button("💾 儲存修改", key=f"save_edit_{idx}"):
+                            st.session_state.df.at[idx, 'title'] = et
+                            st.session_state.df.at[idx, 'note'] = en
+                            st.session_state.df.at[idx, 'content_en'] = ee
+                            st.session_state.df.at[idx, 'content_tw'] = ew
+                            if save_to_gs(st.session_state.df):
+                                st.session_state[f"edit_mode_{idx}"] = False
+                                st.rerun()
+                        if ec2.button("✖️ 取消", key=f"cancel_{idx}"):
                             st.session_state[f"edit_mode_{idx}"] = False
                             st.rerun()
-                    if ec2.button("✖️ 取消", key=f"cancel_{idx}"):
-                        st.session_state[f"edit_mode_{idx}"] = False
-                        st.rerun()
