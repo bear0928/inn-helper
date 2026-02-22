@@ -1,5 +1,5 @@
 streamlit
 pandas
-st-gsheets-connection
+gspread
 deep-translator
 streamlit-sortables
