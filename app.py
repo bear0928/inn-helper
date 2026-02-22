@@ -26,9 +26,11 @@ worksheet = init_gspread()
 def get_gs_data():
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
+    # 確保所有必要欄位存在，包含 color
     cols = ["id", "branch", "category", "title", "content_en", "content_tw", "note", "priority", "color"]
     for col in cols:
-        if col not in df.columns: df[col] = "None"
+        if col not in df.columns: 
+            df[col] = "None"
     return df
 
 def save_to_gs(df):
@@ -37,22 +39,23 @@ def save_to_gs(df):
         data_to_save = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
         worksheet.clear()
         worksheet.update(data_to_save)
-        st.toast("🚀 雲端同步成功")
+        st.toast("🚀 雲端同步成功！")
         return True
     except Exception as e:
         st.error(f"❌ 同步失敗: {e}")
         return False
 
-# --- 2. 網頁配置與 CSS (關鍵：固定高度與樣式) ---
+# --- 2. 網頁基礎配置與核心 CSS ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
+
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem; max-width: 100% !important; }
     
-    /* 強制所有方框按鈕大小相同 */
+    /* 強制所有方框按鈕寬度填滿、高度一致 */
     div.stButton > button {
         width: 100% !important;
-        height: 100px !important; /* 固定高度 */
+        height: 110px !important; /* 固定高度，避免排版跳動 */
         border-radius: 12px !important;
         font-size: 18px !important;
         font-weight: bold !important;
@@ -61,19 +64,29 @@ st.markdown("""
         align-items: center !important;
         justify-content: center !important;
         text-align: center !important;
-        white-space: normal !important;
+        white-space: normal !important; /* 允許文字自動換行 */
         word-wrap: break-word !important;
         box-shadow: 2px 2px 6px rgba(0,0,0,0.05) !important;
+        transition: transform 0.1s, box-shadow 0.1s !important;
+    }
+
+    /* 滑鼠懸停的浮動效果 */
+    div.stButton > button:hover {
+        transform: scale(1.02);
+        box-shadow: 4px 4px 10px rgba(0,0,0,0.1) !important;
+        border-color: #ff4b4b !important;
     }
     
     /* 展開內容的複製框高度限制 */
     div[data-testid="stMarkdownContainer"] pre {
         max-height: 200px !important;
         overflow-y: auto !important;
+        border: 1px solid #eee !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
+# 初始化 Session State
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 if 'authenticated' not in st.session_state:
@@ -97,7 +110,7 @@ staff_name = "Kuma"
 if user_mode == "公版回覆":
     if not st.session_state.authenticated:
         with st.sidebar:
-            pwd = st.text_input("管理密碼", type="password")
+            pwd = st.text_input("管理員密碼", type="password")
             if pwd == "000000":
                 st.session_state.authenticated = True
                 st.rerun()
@@ -109,38 +122,39 @@ else:
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
     staff_name = st.sidebar.selectbox("員工帳號", staff_list) if staff_list else st.sidebar.text_input("新帳號", value="Kuma")
 
-# --- 5. 側邊欄：功能 ---
+# --- 5. 側邊欄：新增與排序 ---
 if is_admin:
     with st.sidebar:
         st.divider()
-        sort_mode = st.toggle("🔄 排序模式")
-        with st.expander("➕ 新增模板"):
+        sort_mode = st.toggle("🔄 開啟排序模式")
+        with st.expander("➕ 新增回覆模板"):
             with st.form("add_form", clear_on_submit=True):
-                n_t = st.text_input("標題")
-                n_n = st.text_input("備註")
-                n_c = st.selectbox("顏色", ["None", "Red", "Blue", "Green", "Yellow", "Purple"])
-                n_e = st.text_area("英文")
-                n_w = st.text_area("中文")
-                if st.form_submit_button("儲存"):
+                n_t = st.text_input("標題 (顯示在方框上)")
+                n_n = st.text_input("備註 (展開後顯示)")
+                n_c = st.selectbox("顏色分類", ["None", "Red", "Blue", "Green", "Yellow", "Purple"])
+                n_e = st.text_area("英文內容", height=100)
+                n_w = st.text_area("中文內容", height=100)
+                if st.form_submit_button("💾 儲存"):
                     if n_t:
                         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
                         new_row = pd.DataFrame([{"id": 999, "branch": branch, "category": target_cat, "title": n_t, "content_en": n_e, "content_tw": n_w, "note": n_n, "priority": 999, "color": n_c}])
                         st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-                        save_to_gs(st.session_state.df); st.rerun()
+                        save_to_gs(st.session_state.df)
+                        st.rerun()
 
 # --- 6. 翻譯中心 ---
-src_text = st.text_input("🌐 翻譯中心：", placeholder="在此輸入客人訊息...")
+src_text = st.text_input("🌐 翻譯中心 (自動偵測 -> 繁中)：", placeholder="在此貼上客人的訊息...")
 if src_text:
     translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
     st.code(translated, language="text")
 
 st.divider()
 
-# --- 7. 顯示邏輯 ---
+# --- 7. 內容顯示與操作邏輯 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
-# 顏色對應表 (柔和背景色)
+# 定義好看的柔和背景色碼
 color_map = {
     "Red": "#FFEBEE", "Blue": "#E3F2FD", "Green": "#E8F5E9", 
     "Yellow": "#FFFDE7", "Purple": "#F3E5F5", "None": "#FFFFFF"
@@ -150,72 +164,104 @@ if not view_df.empty:
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
+    # 排序功能
     if is_admin and sort_mode:
         titles = view_df['title'].tolist()
         sorted_titles = sort_items(titles, key="sort_list")
         if st.button("🚀 儲存新順序"):
             for i, t in enumerate(sorted_titles):
                 st.session_state.df.loc[st.session_state.df['title'] == t, 'priority'] = i
-            save_to_gs(st.session_state.df); st.rerun()
+            save_to_gs(st.session_state.df)
+            st.rerun()
     
-    elif ui_style: # 方框模式
-        cols = st.columns(4) 
-        for i, (idx, row) in enumerate(view_df.iterrows()):
-            with cols[i % 4]:
-                # 核心：根據 row['color'] 注入背景顏色
-                bg = color_map.get(row['color'], "#FFFFFF")
-                st.markdown(f"""
-                    <style>
-                    div[data-testid="stHorizontalBlock"] > div:nth-child({(i%4)+1}) button {{
-                        background-color: {bg} !important;
-                    }}
-                    </style>
-                """, unsafe_allow_html=True)
-                
-                if st.button(f"{row['title']}", key=f"box_{idx}"):
-                    st.session_state[f"show_{idx}"] = not st.session_state.get(f"show_{idx}", False)
-                
-                # 展開詳細內容
-                if st.session_state.get(f"show_{idx}", False):
-                    with st.container(border=True):
-                        if row['note']: st.caption(f"🏷️ {row['note']}")
-                        st.write("**🇺🇸 English**"); st.code(row['content_en'], language="text")
-                        st.write("**🇹🇼 中文**"); st.code(row['content_tw'], language="text")
-                        if is_admin:
-                            c1, c2 = st.columns(2)
-                            if c1.button("✏️", key=f"ed_v_{idx}"): 
-                                st.session_state[f"edit_mode_{idx}"] = True
-                                st.rerun()
-                            if c2.button("🗑️", key=f"de_v_{idx}"):
-                                st.session_state.df = st.session_state.df.drop(idx)
-                                save_to_gs(st.session_state.df); st.rerun()
-    else: # 清單模式
+    # 🔲 模式 A：方框大格模式
+    elif ui_style:
+        # 將資料以 4 個為一組切割，確保每列都是 4 格等寬
+        items = list(view_df.iterrows())
+        for row_idx in range(0, len(items), 4):
+            cols = st.columns(4)
+            row_items = items[row_idx:row_idx+4]
+            
+            for col_idx, (idx, row) in enumerate(row_items):
+                with cols[col_idx]:
+                    # 🚀 進階 CSS 注入：利用 :has() 精準鎖定這個 column 裡的按鈕上色
+                    bg_color = color_map.get(row['color'], "#FFFFFF")
+                    st.markdown(f'<div id="color_marker_{idx}"></div>', unsafe_allow_html=True)
+                    st.markdown(f"""
+                        <style>
+                        div[data-testid="column"]:has(#color_marker_{idx}) button {{
+                            background-color: {bg_color} !important;
+                        }}
+                        </style>
+                    """, unsafe_allow_html=True)
+                    
+                    # 渲染方框按鈕
+                    if st.button(f"{row['title']}", key=f"box_{idx}"):
+                        st.session_state[f"show_{idx}"] = not st.session_state.get(f"show_{idx}", False)
+                    
+                    # 展開詳細內容 (防擠壓設計)
+                    if st.session_state.get(f"show_{idx}", False) and not st.session_state.get(f"edit_mode_{idx}", False):
+                        with st.container(border=True):
+                            if row['note']: st.caption(f"🏷️ {row['note']}")
+                            st.write("**🇺🇸 English**")
+                            st.code(row['content_en'], language="text")
+                            st.write("**🇹🇼 中文**")
+                            st.code(row['content_tw'], language="text")
+                            
+                            # 管理員按鈕
+                            if is_admin:
+                                c1, c2 = st.columns(2)
+                                if c1.button("✏️ 編輯", key=f"ed_v_{idx}"): 
+                                    st.session_state[f"edit_mode_{idx}"] = True
+                                    st.rerun()
+                                if c2.button("🗑️ 刪除", key=f"de_v_{idx}"):
+                                    st.session_state.df = st.session_state.df.drop(idx)
+                                    save_to_gs(st.session_state.df)
+                                    st.rerun()
+
+    # 📜 模式 B：清單模式 (下拉 Expand)
+    else:
         for idx, row in view_df.iterrows():
             col_l1, col_l2, col_l3 = st.columns([0.86, 0.07, 0.07])
             with col_l1:
-                with st.expander(f"📌 {row['title']} | {row['note']}"):
+                # 幫下拉清單的標題也加上一點顏色的 Emoji 提示
+                color_emoji = {"Red":"🔴", "Blue":"🔵", "Green":"🟢", "Yellow":"🟡", "Purple":"🟣", "None":"⚪"}.get(row['color'], "⚪")
+                note_str = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
+                
+                with st.expander(f"{color_emoji} **{row['title']}** {note_str}"):
+                    st.write("**🇺🇸 English**")
                     st.code(row['content_en'], language="text")
+                    st.write("**🇹🇼 中文**")
                     st.code(row['content_tw'], language="text")
+            
             if is_admin:
                 with col_l2:
                     if st.button("✏️", key=f"ed_l_{idx}"): 
-                        st.session_state[f"edit_mode_{idx}"] = True; st.rerun()
+                        st.session_state[f"edit_mode_{idx}"] = True
+                        st.rerun()
                 with col_l3:
                     if st.button("🗑️", key=f"de_l_{idx}"):
                         st.session_state.df = st.session_state.df.drop(idx)
-                        save_to_gs(st.session_state.df); st.rerun()
+                        save_to_gs(st.session_state.df)
+                        st.rerun()
 
-    # 通用編輯區塊
+    # --- 8. 通用編輯區塊 (共用邏輯) ---
     for idx in view_df.index:
         if st.session_state.get(f"edit_mode_{idx}", False):
             row = st.session_state.df.loc[idx]
+            st.markdown("---")
             with st.container(border=True):
-                st.subheader(f"🛠️ 編輯: {row['title']}")
-                et = st.text_input("標題", row['title'], key=f"t_{idx}")
-                en = st.text_input("標籤", row['note'], key=f"n_{idx}")
-                ec = st.selectbox("顏色分類", list(color_map.keys()), index=list(color_map.keys()).index(row['color']) if row['color'] in color_map else 0, key=f"c_{idx}")
-                ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=150)
-                ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=150)
+                st.subheader(f"🛠️ 正在編輯：{row['title']}")
+                et = st.text_input("修改標題", row['title'], key=f"t_{idx}")
+                en = st.text_input("修改備註", row['note'], key=f"n_{idx}")
+                
+                # 確保顏色有正確的預設選項
+                current_color = row['color'] if row['color'] in color_map else "None"
+                ec = st.selectbox("修改顏色", list(color_map.keys()), index=list(color_map.keys()).index(current_color), key=f"c_{idx}")
+                
+                ee = st.text_area("編輯英文", row['content_en'], key=f"ee_{idx}", height=150)
+                ew = st.text_area("編輯中文", row['content_tw'], key=f"ew_{idx}", height=150)
+                
                 b1, b2 = st.columns(2)
                 if b1.button("💾 儲存修改", key=f"save_{idx}"):
                     st.session_state.df.at[idx, 'title'] = et
@@ -225,6 +271,8 @@ if not view_df.empty:
                     st.session_state.df.at[idx, 'content_tw'] = ew
                     save_to_gs(st.session_state.df)
                     st.session_state[f"edit_mode_{idx}"] = False
+                    st.session_state[f"show_{idx}"] = False # 編輯完收起
                     st.rerun()
                 if b2.button("✖️ 取消", key=f"cancel_{idx}"):
-                    st.session_state[f"edit_mode_{idx}"] = False; st.rerun()
+                    st.session_state[f"edit_mode_{idx}"] = False
+                    st.rerun()
