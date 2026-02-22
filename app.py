@@ -9,16 +9,12 @@ from streamlit_sortables import sort_items
 def init_gspread():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        
-        # 從 st.secrets 讀取並強制修復 private_key 換行問題
         info = dict(st.secrets["gcp_service_account"])
         if "private_key" in info:
             info["private_key"] = info["private_key"].replace("\\n", "\n")
-        
         creds = Credentials.from_service_account_info(info, scopes=scope)
         client = gspread.authorize(creds)
-        
-        SHEET_NAME = "InnHelperDB" 
+        SHEET_NAME = "InnHelperDB"
         sh = client.open(SHEET_NAME)
         return sh.get_worksheet(0)
     except Exception as e:
@@ -28,7 +24,6 @@ def init_gspread():
 worksheet = init_gspread()
 
 def get_gs_data():
-    """讀取雲端資料並轉換為 DataFrame"""
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
     cols = ["id", "branch", "category", "title", "content_en", "content_tw", "note", "priority"]
@@ -38,7 +33,6 @@ def get_gs_data():
     return df
 
 def save_to_gs(df):
-    """將 DataFrame 完整覆蓋回雲端"""
     try:
         df_clean = df.fillna("")
         data_to_save = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
@@ -53,9 +47,18 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
-# CSS 優化
+# ✨ CSS 優化：強制讓 expander 與內容撐開到最大寬度
 st.markdown("""
     <style>
+    /* 強制主容器與 expander 寬度 100% */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 100% !important;
+    }
+    .stExpander {
+        width: 100% !important;
+    }
     code { white-space: pre-wrap !important; word-break: break-word !important; }
     textarea { font-family: sans-serif !important; }
     </style>
@@ -63,7 +66,6 @@ st.markdown("""
 
 ADMIN_PASSWORD = "000000"
 
-# --- 3. 讀取最新資料 ---
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
@@ -81,12 +83,9 @@ if user_mode == "公版回覆":
 else:
     is_admin = True
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-    if staff_list:
-        staff_name = st.sidebar.selectbox("員工帳號", staff_list)
-    else:
-        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
+    staff_name = st.sidebar.selectbox("員工帳號", staff_list) if staff_list else st.sidebar.text_input("輸入新員工姓名", value="Kuma")
 
-# --- 5. 新增模板 (Form) ---
+# --- 5. 新增模板 ---
 if is_admin:
     st.sidebar.divider()
     with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
@@ -95,43 +94,22 @@ if is_admin:
             n_n = st.text_input("備註標籤")
             n_e = st.text_area("英文內容", height=200)
             n_w = st.text_area("中文內容", height=200)
-            
             if st.form_submit_button("💾 確認儲存模板"):
                 if n_t:
                     target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
                     new_id = int(pd.to_numeric(st.session_state.df['id']).max() + 1) if not st.session_state.df.empty else 1
-                    new_row = pd.DataFrame([{
-                        "id": new_id,
-                        "branch": branch,
-                        "category": target_cat,
-                        "title": n_t,
-                        "content_en": n_e,
-                        "content_tw": n_w,
-                        "note": n_n,
-                        "priority": len(st.session_state.df)
-                    }])
+                    new_row = pd.DataFrame([{"id": new_id, "branch": branch, "category": target_cat, "title": n_t, "content_en": n_e, "content_tw": n_w, "note": n_n, "priority": len(st.session_state.df)}])
                     st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
                     if save_to_gs(st.session_state.df):
-                        st.success("✅ 儲存成功！")
                         st.rerun()
 
-# --- 6. 主畫面 (強化翻譯中心) ---
+# --- 6. 主畫面 (翻譯中心) ---
 st.title(f"💬 {branch} 客服中心")
-
-# ⚡ 強化版：各國語言自動偵測翻譯中心
 src_text = st.text_input("🌐 各國語言翻譯 (自動偵測 -> 繁中)：", placeholder="請貼上客人的訊息...")
-
 if src_text:
-    with st.spinner('翻譯中...'):
-        try:
-            # source='auto' 會自動偵測輸入語言
-            translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-            st.success(f"**繁體中文翻譯：**\n\n{translated}")
-            
-            # 提供快速複製翻譯結果的區塊
-            st.code(translated, language="text")
-        except Exception as e:
-            st.error(f"翻譯失敗，請檢查網路或稍後再試。錯誤細節: {e}")
+    translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
+    st.success(f"**繁體中文翻譯：**\n\n{translated}")
+    st.code(translated, language="text")
 
 st.divider()
 
@@ -147,7 +125,6 @@ else:
     view_df = view_df.sort_values("priority")
 
     if sort_mode:
-        st.subheader("🖱️ 拖動標題調整順序")
         titles = view_df['title'].tolist()
         sorted_titles = sort_items(titles)
         if st.button("🚀 儲存新順序"):
@@ -157,12 +134,13 @@ else:
             save_to_gs(st.session_state.df)
             st.rerun()
     else:
+        # ✨ 重點修正：讓顯示區域與翻譯框一樣寬
         for idx, row in view_df.iterrows():
-            col1, col2 = st.columns([0.85, 0.15])
+            # 使用更寬的比例 [0.95, 0.05] 讓內容區域最大化
+            col1, col2 = st.columns([0.95, 0.05])
             with col1:
                 note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
                 header_text = f"📌 **{row['title']}** {note_display}"
-                
                 with st.expander(header_text):
                     st.write("**🇺🇸 English**")
                     st.code(row['content_en'], language="text")
@@ -171,30 +149,8 @@ else:
             
             if is_admin:
                 with col2:
-                    if st.button("✏️", key=f"edit_btn_{idx}"):
-                        st.session_state[f"edit_mode_{idx}"] = True
-                    if st.button("🗑️", key=f"del_btn_{idx}"):
+                    # 使用小圖示按鈕減少佔位
+                    if st.button("🗑️", key=f"del_{idx}"):
                         st.session_state.df = st.session_state.df.drop(idx)
                         save_to_gs(st.session_state.df)
                         st.rerun()
-                
-                if st.session_state.get(f"edit_mode_{idx}", False):
-                    with st.container(border=True):
-                        st.subheader(f"🛠️ 修改模板：{row['title']}")
-                        et = st.text_input("標題", row['title'], key=f"t_{idx}")
-                        en = st.text_input("備註", row['note'], key=f"n_{idx}")
-                        ee = st.text_area("英文內容", row['content_en'], key=f"en_{idx}", height=300)
-                        ew = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=300)
-                        
-                        c1, c2 = st.columns(2)
-                        if c1.button("💾 儲存修改", key=f"save_edit_{idx}"):
-                            st.session_state.df.at[idx, 'title'] = et
-                            st.session_state.df.at[idx, 'note'] = en
-                            st.session_state.df.at[idx, 'content_en'] = ee
-                            st.session_state.df.at[idx, 'content_tw'] = ew
-                            save_to_gs(st.session_state.df)
-                            st.session_state[f"edit_mode_{idx}"] = False
-                            st.rerun()
-                        if c2.button("✖️ 取消", key=f"cancel_{idx}"):
-                            st.session_state[f"edit_mode_{idx}"] = False
-                            st.rerun()
