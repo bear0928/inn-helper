@@ -9,11 +9,16 @@ from streamlit_sortables import sort_items
 def init_gspread():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        # 從 st.secrets 讀取你剛剛設定的 [gcp_service_account]
-        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+        
+        # --- 核心修正區：強制修復 private_key 的換行問題 ---
+        info = dict(st.secrets["gcp_service_account"])
+        if "private_key" in info:
+            # 將字面上的 \n 替換成真正的換行符號
+            info["private_key"] = info["private_key"].replace("\\n", "\n")
+        
+        creds = Credentials.from_service_account_info(info, scopes=scope)
         client = gspread.authorize(creds)
         
-        # 請確保這裡的名稱與你的 Google Sheet 檔案名稱完全一致
         SHEET_NAME = "InnHelperDB" 
         sh = client.open(SHEET_NAME)
         return sh.get_worksheet(0)
