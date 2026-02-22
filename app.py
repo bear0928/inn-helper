@@ -5,20 +5,20 @@ from google.oauth2.service_account import Credentials
 from deep_translator import GoogleTranslator
 from streamlit_sortables import sort_items
 
-# --- 1. 初始化 Google Sheets (使用 Secrets 憑證) ---
+# --- 1. 初始化 Google Sheets (整合自動修復邏輯) ---
 def init_gspread():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         
-        # --- 核心修正區：強制修復 private_key 的換行問題 ---
+        # 從 st.secrets 讀取並強制修復 private_key 換行問題
         info = dict(st.secrets["gcp_service_account"])
         if "private_key" in info:
-            # 將字面上的 \n 替換成真正的換行符號
             info["private_key"] = info["private_key"].replace("\\n", "\n")
         
         creds = Credentials.from_service_account_info(info, scopes=scope)
         client = gspread.authorize(creds)
         
+        # 請確保這裡的名稱與你的 Google Sheet 檔案名稱完全一致
         SHEET_NAME = "InnHelperDB" 
         sh = client.open(SHEET_NAME)
         return sh.get_worksheet(0)
@@ -32,7 +32,6 @@ def get_gs_data():
     """讀取雲端資料並轉換為 DataFrame"""
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
-    # 確保必要欄位存在
     cols = ["id", "branch", "category", "title", "content_en", "content_tw", "note", "priority"]
     for col in cols:
         if col not in df.columns:
@@ -42,9 +41,7 @@ def get_gs_data():
 def save_to_gs(df):
     """將 DataFrame 完整覆蓋回雲端"""
     try:
-        # 將 NaN 轉為空字串避免寫入錯誤
         df_clean = df.fillna("")
-        # 準備資料列表 (標題 + 內容)
         data_to_save = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
         worksheet.clear()
         worksheet.update(data_to_save)
@@ -57,6 +54,7 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
+# CSS 優化：確保代碼塊換行
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
@@ -83,12 +81,11 @@ if user_mode == "公版回覆":
         is_admin = True
 else:
     is_admin = True
-    # 找出所有非公版的員工名稱
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
     if staff_list:
         staff_name = st.sidebar.selectbox("員工帳號", staff_list)
     else:
-        staff_name = st.sidebar.text_input("輸入新員工姓名", value="")
+        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
 
 # --- 5. 新增模板 (Form) ---
 if is_admin:
@@ -117,10 +114,8 @@ if is_admin:
                     if save_to_gs(st.session_state.df):
                         st.success("✅ 儲存成功！")
                         st.rerun()
-                else:
-                    st.error("標題必填！")
 
-# --- 6. 主畫面：翻譯與顯示 ---
+# --- 6. 主畫面 ---
 st.title(f"💬 {branch} 客服中心")
 src_text = st.text_input("🌐 翻譯中心 (自動偵測 -> 繁中)：")
 if src_text:
@@ -129,7 +124,7 @@ if src_text:
 
 st.divider()
 
-# 過濾顯示內容
+# --- 7. 內容顯示與排序 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -137,8 +132,6 @@ if view_df.empty:
     st.info(f"目前【{current_cat}】尚無模板資料。")
 else:
     sort_mode = st.sidebar.toggle("🔄 拖動排序模式")
-    
-    # 確保 priority 為數字以便排序
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
@@ -147,7 +140,6 @@ else:
         titles = view_df['title'].tolist()
         sorted_titles = sort_items(titles)
         if st.button("🚀 儲存新順序"):
-            # 更新總表中的 priority
             for i, t in enumerate(sorted_titles):
                 mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat) & (st.session_state.df['title'] == t)
                 st.session_state.df.loc[mask, 'priority'] = i
@@ -157,8 +149,11 @@ else:
         for idx, row in view_df.iterrows():
             col1, col2 = st.columns([0.85, 0.15])
             with col1:
-                display_note = f" {row['note']}" if row['note'] else ""
-                with st.expander(f"📌 {row['title']} {display_note}"):
+                # ✨ UI 修正：標題加粗並使用 Emoji 分隔備註
+                note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
+                header_text = f"📌 **{row['title']}** {note_display}"
+                
+                with st.expander(header_text):
                     st.write("**🇺🇸 English**")
                     st.code(row['content_en'], language="text")
                     st.write("**🇹🇼 中文**")
@@ -173,7 +168,6 @@ else:
                         save_to_gs(st.session_state.df)
                         st.rerun()
                 
-                # 修改功能大框框
                 if st.session_state.get(f"edit_mode_{idx}", False):
                     with st.container(border=True):
                         st.subheader(f"🛠️ 修改模板：{row['title']}")
