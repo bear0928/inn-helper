@@ -23,8 +23,7 @@ worksheet = init_gspread()
 
 def get_gs_data():
     data = worksheet.get_all_records()
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
 
 def save_to_gs(df):
     try:
@@ -38,24 +37,30 @@ def save_to_gs(df):
         st.error(f"❌ 同步失敗: {e}")
         return False
 
-# --- 2. 網頁配置與 CSS 優化 ---
+# --- 2. 網頁配置與 CSS ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
 st.markdown("""
     <style>
-    /* 讓 code 顯示框變得很短且有捲軸 */
-    div[data-testid="stMarkdownContainer"] pre {
-        max-height: 120px !important; /* 限制高度在約三行字左右 */
-        overflow-y: auto !important;
-        background-color: #f8f9fa;
-        border: 1px solid #ddd;
+    /* 移除所有 code 框的背景與邊框，使其看起來像純文字 */
+    code { 
+        background-color: transparent !important; 
+        color: #333 !important; 
+        padding: 0 !important;
+        font-family: sans-serif !important;
+        white-space: pre-wrap !important;
     }
-    code { white-space: pre-wrap !important; }
-    
-    /* 讓檢視按鈕更醒目 */
+    /* 限制檢視區域高度並允許捲動，但不顯示灰色背景 */
+    .text-container {
+        max-height: 150px;
+        overflow-y: auto;
+        padding: 10px;
+        border-left: 3px solid #f0f2f6;
+        margin: 10px 0;
+    }
     div.stButton > button {
-        border-radius: 20px;
-        font-weight: bold;
+        width: 100%;
+        border-radius: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -64,15 +69,22 @@ if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
 # --- 3. 側邊欄 ---
-st.sidebar.title("🏨 旅館管理")
 branch = st.sidebar.selectbox("分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別", ["公版回覆", "個人常用"])
 is_admin = (st.sidebar.text_input("管理密碼", type="password") == "000000") if user_mode == "公版回覆" else True
 
-# --- 4. 主畫面 ---
+# --- 4. 主畫面：翻譯中心 ---
 st.title(f"💬 {branch} 客服中心")
+
+src_text = st.text_input("🌐 快速翻譯：", placeholder="輸入文字自動轉繁中...")
+if src_text:
+    res = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
+    st.info(f"**翻譯結果：**")
+    st.write(res) # 使用純文字顯示翻譯
+
 st.divider()
 
+# --- 5. 模板內容顯示 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else "Kuma"
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -85,33 +97,37 @@ if not view_df.empty:
         header_text = f"📌 **{row['title']}** {note_display}"
         
         with st.expander(header_text):
-            # 檢視按鈕：點擊後會顯示內容框
-            btn_col1, btn_col2 = st.columns(2)
+            c1, c2 = st.columns(2)
             
-            show_key = f"view_content_{idx}"
+            show_key = f"view_{idx}"
             if show_key not in st.session_state:
                 st.session_state[show_key] = None
 
-            if btn_col1.button("👁️ 檢視英文內容", key=f"v_en_{idx}"):
-                st.session_state[show_key] = ("🇺🇸 英文已就緒", row['content_en'])
-                st.toast("請點擊下方框框右上角圖示進行複製")
+            # 點擊按鈕
+            if c1.button("👁️ 檢視英文", key=f"v_en_{idx}"):
+                st.session_state[show_key] = ("🇺🇸 英文內容", row['content_en'])
+            if c2.button("👁️ 檢視中文", key=f"v_tw_{idx}"):
+                st.session_state[show_key] = ("🇹🇼 中文內容", row['content_tw'])
 
-            if btn_col2.button("👁️ 檢視中文內容", key=f"v_tw_{idx}"):
-                st.session_state[show_key] = ("🇹🇼 中文已就緒", row['content_tw'])
-                st.toast("請點擊下方框框右上角圖示進行複製")
-
-            # 顯示短小的檢視複製框
-            if st.session_state[show_key] is not None:
+            # 顯示純文字檢視區
+            if st.session_state[show_key]:
                 label, content = st.session_state[show_key]
-                st.info(f"**{label}**")
-                # 此 code 區塊受 CSS 限制，高度僅 120px，且內建複製按鈕
-                st.code(content, language="text")
+                st.markdown(f"**{label}**")
                 
-                if st.button("✖️ 關閉內容", key=f"close_{idx}"):
+                # 使用 HTML div 包裹純文字，達成限高且無框的效果
+                st.markdown(f'''
+                    <div class="text-container">
+                        {content}
+                    </div>
+                ''', unsafe_allow_html=True)
+                
+                # 提示使用者手動全選複製
+                st.caption("💡 請長按上方文字即可全選複製")
+                
+                if st.button("✖️ 關閉", key=f"close_{idx}"):
                     st.session_state[show_key] = None
                     st.rerun()
             
-            # 管理按鈕
             if is_admin:
                 st.divider()
                 if st.button("🗑️ 刪除", key=f"del_{idx}"):
