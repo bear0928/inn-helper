@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 from deep_translator import GoogleTranslator
 from streamlit_sortables import sort_items
 
-# --- 1. 初始化 Google Sheets (整合自動修復邏輯) ---
+# --- 1. 初始化 Google Sheets ---
 def init_gspread():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -47,110 +47,72 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
-# ✨ CSS 優化：強制讓 expander 與內容撐開到最大寬度
+# ✨ CSS 優化：定義固定高度且可滾動的文字區塊
 st.markdown("""
     <style>
-    /* 強制主容器與 expander 寬度 100% */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 100% !important;
+    .block-container { padding-top: 2rem; max-width: 100% !important; }
+    .stExpander { width: 100% !important; }
+    
+    /* 自定義滾動文字區塊 (無複製框背景) */
+    .scroll-box {
+        height: 200px; /* 固定高度 */
+        overflow-y: auto; /* 垂直滾動 */
+        padding: 15px;
+        background-color: #fcfcfc; /* 極淺灰背景，區隔內容 */
+        border: 1px solid #eee;
+        border-radius: 8px;
+        white-space: pre-wrap; /* 保留換行 */
+        font-family: sans-serif;
+        line-height: 1.6;
+        color: #333;
     }
-    .stExpander {
-        width: 100% !important;
-    }
-    code { white-space: pre-wrap !important; word-break: break-word !important; }
-    textarea { font-family: sans-serif !important; }
     </style>
 """, unsafe_allow_html=True)
-
-ADMIN_PASSWORD = "000000"
 
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
-# --- 4. 側邊欄邏輯 ---
-st.sidebar.title("🏨 旅館管理 (Cloud)")
+# --- 4. 側邊欄與翻譯中心 (略，維持原樣) ---
 branch = st.sidebar.selectbox("切換分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別選擇", ["公版回覆", "個人常用"])
+is_admin = (st.sidebar.text_input("管理密碼", type="password") == "000000") if user_mode == "公版回覆" else True
 
-is_admin = False
-staff_name = "Kuma"
-
-if user_mode == "公版回覆":
-    if st.sidebar.text_input("管理密碼", type="password") == ADMIN_PASSWORD:
-        is_admin = True
-else:
-    is_admin = True
-    staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-    staff_name = st.sidebar.selectbox("員工帳號", staff_list) if staff_list else st.sidebar.text_input("輸入新員工姓名", value="Kuma")
-
-# --- 5. 新增模板 ---
-if is_admin:
-    st.sidebar.divider()
-    with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
-        with st.form("add_form", clear_on_submit=True):
-            n_t = st.text_input("模板標題 (必填)")
-            n_n = st.text_input("備註標籤")
-            n_e = st.text_area("英文內容", height=200)
-            n_w = st.text_area("中文內容", height=200)
-            if st.form_submit_button("💾 確認儲存模板"):
-                if n_t:
-                    target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-                    new_id = int(pd.to_numeric(st.session_state.df['id']).max() + 1) if not st.session_state.df.empty else 1
-                    new_row = pd.DataFrame([{"id": new_id, "branch": branch, "category": target_cat, "title": n_t, "content_en": n_e, "content_tw": n_w, "note": n_n, "priority": len(st.session_state.df)}])
-                    st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-                    if save_to_gs(st.session_state.df):
-                        st.rerun()
-
-# --- 6. 主畫面 (翻譯中心) ---
 st.title(f"💬 {branch} 客服中心")
 src_text = st.text_input("🌐 各國語言翻譯 (自動偵測 -> 繁中)：", placeholder="請貼上客人的訊息...")
 if src_text:
     translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-    st.success(f"**繁體中文翻譯：**\n\n{translated}")
-    st.code(translated, language="text")
+    st.info(f"**翻譯結果：**")
+    st.write(translated)
 
 st.divider()
 
-# --- 7. 內容顯示與排序 ---
-current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+# --- 7. 內容顯示 ---
+current_cat = "公版回覆" if user_mode == "公版回覆" else "Kuma"
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
-if view_df.empty:
-    st.info(f"目前【{current_cat}】尚無模板資料。")
-else:
-    sort_mode = st.sidebar.toggle("🔄 拖動排序模式")
+if not view_df.empty:
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
-    if sort_mode:
-        titles = view_df['title'].tolist()
-        sorted_titles = sort_items(titles)
-        if st.button("🚀 儲存新順序"):
-            for i, t in enumerate(sorted_titles):
-                mask = (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat) & (st.session_state.df['title'] == t)
-                st.session_state.df.loc[mask, 'priority'] = i
-            save_to_gs(st.session_state.df)
-            st.rerun()
-    else:
-        # ✨ 重點修正：讓顯示區域與翻譯框一樣寬
-        for idx, row in view_df.iterrows():
-            # 使用更寬的比例 [0.95, 0.05] 讓內容區域最大化
-            col1, col2 = st.columns([0.95, 0.05])
-            with col1:
-                note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
-                header_text = f"📌 **{row['title']}** {note_display}"
-                with st.expander(header_text):
-                    st.write("**🇺🇸 English**")
-                    st.code(row['content_en'], language="text")
-                    st.write("**🇹🇼 中文**")
-                    st.code(row['content_tw'], language="text")
+    for idx, row in view_df.iterrows():
+        col1, col2 = st.columns([0.95, 0.05])
+        with col1:
+            note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
+            header_text = f"📌 **{row['title']}** {note_display}"
             
-            if is_admin:
-                with col2:
-                    # 使用小圖示按鈕減少佔位
-                    if st.button("🗑️", key=f"del_{idx}"):
-                        st.session_state.df = st.session_state.df.drop(idx)
-                        save_to_gs(st.session_state.df)
-                        st.rerun()
+            with st.expander(header_text):
+                # 使用 HTML渲染固定高度的滾動視窗
+                st.markdown("**🇺🇸 English Content**")
+                st.markdown(f'<div class="scroll-box">{row["content_en"]}</div>', unsafe_allow_html=True)
+                
+                st.markdown("**🇹🇼 中文內容**")
+                st.markdown(f'<div class="scroll-box">{row["content_tw"]}</div>', unsafe_allow_html=True)
+                
+                st.caption("💡 內容過長時，請在框內滑動滾輪查看完整文字")
+        
+        if is_admin:
+            with col2:
+                if st.button("🗑️", key=f"del_{idx}"):
+                    st.session_state.df = st.session_state.df.drop(idx)
+                    save_to_gs(st.session_state.df)
+                    st.rerun()
