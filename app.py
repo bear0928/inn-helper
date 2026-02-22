@@ -52,30 +52,24 @@ st.markdown("""
     .block-container { padding-top: 2rem; max-width: 100% !important; }
     .stExpander { width: 100% !important; }
     
-    /* 限制 st.code 複製框的高度並允許滾動 */
+    /* 限制 st.code 高度並允許滾動 */
     div[data-testid="stMarkdownContainer"] pre {
         max-height: 180px !important; 
         overflow-y: auto !important;
         border: 1px solid #ddd !important;
         background-color: #f9f9f9 !important;
     }
-    
     code { white-space: pre-wrap !important; word-break: break-word !important; }
     textarea { font-family: sans-serif !important; }
-    
-    /* 讓編輯區塊有明顯區隔 */
-    .edit-box {
-        background-color: #fff4e6;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #ffd8a8;
-        margin-bottom: 10px;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
+
+# 初始化登入狀態
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
 
 # --- 3. 側邊欄：權限與登入 ---
 st.sidebar.title("🏨 旅館管理系統")
@@ -87,10 +81,21 @@ staff_name = "Kuma"
 ADMIN_PASSWORD = "000000"
 
 if user_mode == "公版回覆":
-    pwd = st.sidebar.text_input("管理密碼", type="password")
-    if pwd == ADMIN_PASSWORD:
+    # 如果尚未驗證成功，才顯示輸入框
+    if not st.session_state.authenticated:
+        pwd = st.sidebar.text_input("管理密碼 (Enter 登入)", type="password")
+        if pwd == ADMIN_PASSWORD:
+            st.session_state.authenticated = True
+            st.rerun() # 立即重新整理以隱藏輸入框
+        elif pwd != "":
+            st.sidebar.error("密碼錯誤")
+    else:
         is_admin = True
+        if st.sidebar.button("登出管理員"):
+            st.session_state.authenticated = False
+            st.rerun()
 else:
+    # 個人模式預設開啟編輯權限
     is_admin = True
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
     if staff_list:
@@ -141,7 +146,7 @@ else:
     view_df = view_df.sort_values("priority")
 
     for idx, row in view_df.iterrows():
-        # 標題列
+        # 標題列佈局
         col1, col2, col3 = st.columns([0.86, 0.07, 0.07])
         with col1:
             note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
@@ -152,7 +157,7 @@ else:
                 st.write("**🇹🇼 中文**")
                 st.code(row['content_tw'], language="text")
         
-        # 登入後顯示 編輯與刪除 按鈕
+        # 登入後的功能按鈕
         if is_admin:
             with col2:
                 if st.button("✏️", key=f"edit_btn_{idx}"):
@@ -163,7 +168,7 @@ else:
                     save_to_gs(st.session_state.df)
                     st.rerun()
             
-            # 編輯區塊邏輯
+            # 編輯介面
             if st.session_state.get(f"edit_mode_{idx}", False):
                 with st.container(border=True):
                     st.markdown(f"🛠️ **修改模板：{row['title']}**")
@@ -178,9 +183,9 @@ else:
                         st.session_state.df.at[idx, 'note'] = en
                         st.session_state.df.at[idx, 'content_en'] = ee
                         st.session_state.df.at[idx, 'content_tw'] = ew
-                        save_to_gs(st.session_state.df)
-                        st.session_state[f"edit_mode_{idx}"] = False
-                        st.rerun()
+                        if save_to_gs(st.session_state.df):
+                            st.session_state[f"edit_mode_{idx}"] = False
+                            st.rerun()
                     if ec2.button("✖️ 取消", key=f"cancel_{idx}"):
                         st.session_state[f"edit_mode_{idx}"] = False
                         st.rerun()
