@@ -61,17 +61,17 @@ st.markdown("""
     }
     code { white-space: pre-wrap !important; word-break: break-word !important; }
     
-    /* 方框 UI 的按鈕樣式 */
+    /* 方框 UI 的按鈕樣式：強化標題顯示 */
     div.stButton > button {
         width: 100%;
-        height: 80px;
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        background-color: white;
-        transition: all 0.2s;
-        font-size: 18px !important;
-        font-weight: 600 !important;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+        height: 70px;
+        border-radius: 10px;
+        border: 1px solid #dcdcdc;
+        background-color: #ffffff;
+        font-size: 20px !important;
+        font-weight: bold !important;
+        color: #333;
+        box-shadow: 1px 1px 3px rgba(0,0,0,0.05);
     }
     div.stButton > button:hover {
         border-color: #ff4b4b;
@@ -89,24 +89,19 @@ if 'authenticated' not in st.session_state:
 
 # --- 3. 頂部選擇區 ---
 st.title("🏨 旅館客服管理系統")
-
 col_ui1, col_ui2, col_ui3 = st.columns([0.35, 0.35, 0.3])
-
 with col_ui1:
     branch = st.pills("📍 分館", ["喜園館", "中華館", "長沙館"], default="喜園館")
-
 with col_ui2:
     user_mode = st.pills("🔑 模式", ["公版回覆", "個人常用"], default="公版回覆")
-
 with col_ui3:
-    # 這裡就是切換開關
-    ui_style = st.toggle("🔲 方框模式", value=False, help="開啟後將以大按鈕形式顯示模板，點擊即展開")
+    ui_style = st.toggle("🔲 方框模式", value=True) # 預設開啟
 
 st.divider()
 
-# --- 4. 權限邏輯 ---
+# --- 4. 權限與管理功能 (維持原樣) ---
 is_admin = False
-staff_name = "Kuma"
+staff_name = ""
 if user_mode == "公版回覆":
     if not st.session_state.authenticated:
         with st.sidebar:
@@ -120,9 +115,8 @@ if user_mode == "公版回覆":
 else:
     is_admin = True
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-    staff_name = st.sidebar.selectbox("員工帳號", staff_list) if staff_list else st.sidebar.text_input("新帳號", value="Kuma")
+    staff_name = st.sidebar.selectbox("員工帳號", staff_list) if staff_list else st.sidebar.text_input("新帳號", value="")
 
-# --- 5. 側邊欄功能 ---
 if is_admin:
     with st.sidebar:
         st.divider()
@@ -140,7 +134,7 @@ if is_admin:
                         st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
                         save_to_gs(st.session_state.df); st.rerun()
 
-# --- 6. 翻譯中心 ---
+# --- 5. 翻譯中心 ---
 src_text = st.text_input("🌐 翻譯中心：", placeholder="輸入客人訊息...")
 if src_text:
     translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
@@ -148,7 +142,7 @@ if src_text:
 
 st.divider()
 
-# --- 7. 模板顯示邏輯 ---
+# --- 6. 內容顯示 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -164,19 +158,24 @@ if not view_df.empty:
                 st.session_state.df.loc[st.session_state.df['title'] == t, 'priority'] = i
             save_to_gs(st.session_state.df); st.rerun()
     
-    # 🔲 方框模式 UI
+    # ✨ 修正後的方框模式：點擊前只顯示標題
     elif ui_style:
-        cols = st.columns(3) # 設定一行三個方框
+        cols = st.columns(3) 
         for i, (idx, row) in enumerate(view_df.iterrows()):
             with cols[i % 3]:
-                # 點擊按鈕後將該 ID 存入 Session 以顯示詳情
-                if st.button(f"📌 {row['title']}\n{row['note'][:10]}...", key=f"box_{idx}"):
-                    st.session_state[f"show_detail_{idx}"] = not st.session_state.get(f"show_detail_{idx}", False)
+                # 只顯示標題的方塊
+                if st.button(f"{row['title']}", key=f"box_{idx}"):
+                    st.session_state[f"show_{idx}"] = not st.session_state.get(f"show_{idx}", False)
                 
-                if st.session_state.get(f"show_detail_{idx}", False):
+                # 點擊後展開詳細資訊
+                if st.session_state.get(f"show_{idx}", False):
                     with st.container(border=True):
+                        if row['note']: st.caption(f"🏷️ {row['note']}")
+                        st.write("**🇺🇸 English**")
                         st.code(row['content_en'], language="text")
+                        st.write("**🇹🇼 中文**")
                         st.code(row['content_tw'], language="text")
+                        
                         if is_admin:
                             c1, c2 = st.columns(2)
                             if c1.button("✏️", key=f"ed_v_{idx}"): st.session_state[f"edit_mode_{idx}"] = True
@@ -184,7 +183,7 @@ if not view_df.empty:
                                 st.session_state.df = st.session_state.df.drop(idx)
                                 save_to_gs(st.session_state.df); st.rerun()
 
-    # 📜 清單模式 UI (原本的樣子)
+    # 清單模式 (原本的樣式)
     else:
         for idx, row in view_df.iterrows():
             col1, col2, col3 = st.columns([0.86, 0.07, 0.07])
@@ -202,19 +201,22 @@ if not view_df.empty:
                         st.session_state.df = st.session_state.df.drop(idx)
                         save_to_gs(st.session_state.df); st.rerun()
 
-            # 編輯邏輯 (共用)
-            if st.session_state.get(f"edit_mode_{idx}", False):
-                with st.container(border=True):
-                    et = st.text_input("修改標題", row['title'], key=f"t_{idx}")
-                    en = st.text_input("修改標籤", row['note'], key=f"n_{idx}")
-                    ee = st.text_area("編輯英文", row['content_en'], key=f"en_{idx}", height=150)
-                    ew = st.text_area("編輯中文", row['content_tw'], key=f"tw_{idx}", height=150)
-                    c1, c2 = st.columns(2)
-                    if c1.button("💾 儲存修改", key=f"s_{idx}"):
-                        st.session_state.df.at[idx, 'title'] = et
-                        st.session_state.df.at[idx, 'note'] = en
-                        st.session_state.df.at[idx, 'content_en'] = ee
-                        st.session_state.df.at[idx, 'content_tw'] = ew
-                        save_to_gs(st.session_state.df); st.session_state[f"edit_mode_{idx}"] = False; st.rerun()
-                    if c2.button("✖️ 取消", key=f"c_{idx}"):
-                        st.session_state[f"edit_mode_{idx}"] = False; st.rerun()
+    # 通用編輯邏輯 (全版本共用)
+    for idx in view_df.index:
+        if st.session_state.get(f"edit_mode_{idx}", False):
+            row = st.session_state.df.loc[idx]
+            with st.container(border=True):
+                st.markdown(f"🛠️ **正在編輯：{row['title']}**")
+                et = st.text_input("修改標題", row['title'], key=f"t_{idx}")
+                en = st.text_input("修改標籤", row['note'], key=f"n_{idx}")
+                ee = st.text_area("編輯英文", row['content_en'], key=f"en_{idx}", height=150)
+                ew = st.text_area("編輯中文", row['content_tw'], key=f"tw_{idx}", height=150)
+                c1, c2 = st.columns(2)
+                if c1.button("💾 儲存修改", key=f"s_{idx}"):
+                    st.session_state.df.at[idx, 'title'] = et
+                    st.session_state.df.at[idx, 'note'] = en
+                    st.session_state.df.at[idx, 'content_en'] = ee
+                    st.session_state.df.at[idx, 'content_tw'] = ew
+                    save_to_gs(st.session_state.df); st.session_state[f"edit_mode_{idx}"] = False; st.rerun()
+                if c2.button("✖️ 取消", key=f"c_{idx}"):
+                    st.session_state[f"edit_mode_{idx}"] = False; st.rerun()
