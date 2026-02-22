@@ -101,7 +101,7 @@ else:
     if staff_list:
         staff_name = st.sidebar.selectbox("切換員工帳號", staff_list)
     else:
-        staff_name = st.sidebar.text_input("建立新帳號", value="Kuma")
+        staff_name = st.sidebar.text_input("建立新帳號", value="")
 
 # --- 4. 側邊欄：新增模板表單 ---
 if is_admin:
