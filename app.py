@@ -99,10 +99,13 @@ if 'df' not in st.session_state:
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
+# 分館清單定義
+ALL_BRANCHES = ["喜園館", "中華館", "長沙館"]
+
 # --- 3. 側邊欄：控制中心 ---
 with st.sidebar:
     st.header("⚙️ 系統控制")
-    branch = st.radio("📍 選擇分館", ["喜園館", "中華館", "長沙館"], index=0)
+    branch = st.radio("📍 選擇目前分館", ALL_BRANCHES, index=0)
     user_mode = st.segmented_control("🔑 運作模式", ["公版回覆", "個人常用"], default="公版回覆")
     
     st.divider()
@@ -149,7 +152,7 @@ with st.sidebar:
                         save_to_gs(st.session_state.df)
                         st.rerun()
 
-# --- 4. 主畫面：翻譯中心 (優化邏輯) ---
+# --- 4. 主畫面：翻譯中心 ---
 st.title(f"🏨 {branch} 客服系統")
 
 with st.container(border=True):
@@ -163,24 +166,17 @@ with st.container(border=True):
     
     if src_text.strip():
         try:
-            # 策略：先嘗試翻譯成「繁體中文」
-            # GoogleTranslator 會自動偵測來源語言
+            # 內容比較法判定語言
             translated_to_tw = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-            
-            # 判斷原始內容是否已經是中文 (如果翻成繁中後沒變化，或是與原句極度相似)
-            # 這裡用 strip() 去掉空格，確保判斷準確
             if src_text.strip() == translated_to_tw.strip():
-                # 原文即為中文 -> 執行中翻英
                 final_result = GoogleTranslator(source='auto', target='en').translate(src_text)
                 label = "英文"
             else:
-                # 原文為外語 -> 使用剛才翻好的繁體中文
                 final_result = translated_to_tw
                 label = "繁體中文"
 
             st.success(f"**翻譯結果 ({label})：**")
             st.code(final_result, language="text")
-            
         except Exception as e:
             st.error(f"翻譯發生錯誤: {e}")
 
@@ -229,21 +225,45 @@ if not view_df.empty:
                     save_to_gs(st.session_state.df)
                     st.rerun()
         
+        # --- 編輯與複製區塊 ---
         if st.session_state.get(f"edit_mode_{idx}", False):
             with st.container(border=True):
-                st.write(f"🔧 **修改項目**")
+                st.write(f"🔧 **修改與跨館同步**")
                 ec1, ec2 = st.columns(2)
                 with ec1: et = st.text_input("標題", row['title'], key=f"t_{idx}")
                 with ec2: en = st.text_input("備註", row['note'], key=f"n_{idx}")
                 ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=120)
                 ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=120)
+                
+                # 一鍵複製功能區
+                st.caption("📋 **一鍵複製到其他分館**")
+                target_branches = [b for b in ALL_BRANCHES if b != branch]
+                cols_copy = st.columns(len(target_branches))
+                for i, target_b in enumerate(target_branches):
+                    if cols_copy[i].button(f"🚀 複製到 {target_b}", key=f"cp_{idx}_{target_b}", use_container_width=True):
+                        # 建立新資料行
+                        new_row = pd.DataFrame([{
+                            "id": 999, 
+                            "branch": target_b, 
+                            "category": current_cat, 
+                            "title": et, 
+                            "content_en": ee, 
+                            "content_tw": ew, 
+                            "note": en, 
+                            "priority": 999
+                        }])
+                        st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
+                        if save_to_gs(st.session_state.df):
+                            st.success(f"✅ 已成功複製到 {target_b}！")
+                
+                st.divider()
                 eb1, eb2 = st.columns(2)
-                if eb1.button("💾 確認更新", key=f"save_{idx}", use_container_width=True):
+                if eb1.button("💾 更新目前分館內容", key=f"save_{idx}", use_container_width=True, type="primary"):
                     st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
                     save_to_gs(st.session_state.df)
                     st.session_state[f"edit_mode_{idx}"] = False
                     st.rerun()
-                if eb2.button("✖️ 取消", key=f"cancel_{idx}", use_container_width=True):
+                if eb2.button("✖️ 關閉編輯", key=f"cancel_{idx}", use_container_width=True):
                     st.session_state[f"edit_mode_{idx}"] = False
                     st.rerun()
 else:
