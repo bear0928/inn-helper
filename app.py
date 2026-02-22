@@ -80,13 +80,10 @@ components.html(
     """
     <script>
     const doc = window.parent.document;
-    
-    // 監聽鍵盤事件
     doc.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'TEXTAREA' && e.key === 'Enter') {
             if (!e.shiftKey) {
                 e.preventDefault();
-                // 模擬點擊以觸發 Streamlit 的重新渲染 (透過 blur 觸發)
                 e.target.blur();
                 setTimeout(() => e.target.focus(), 100);
             }
@@ -159,19 +156,20 @@ with st.container(border=True):
     st.subheader("🌐 雙向翻譯中心")
     src_text = st.text_area(
         "輸入內容 (Enter 翻譯 / Shift+Enter 換行)：", 
-        placeholder="輸入外語 → 轉繁體中文 | 輸入中文 → 轉英文", 
+        placeholder="輸入外語 (日韓英等) → 轉繁體中文 | 輸入中文 → 轉英文", 
         height=200,
         key="trans_input"
     )
     
     if src_text:
-        # 偵測是否包含中文字元
+        # 檢查是否含有中文字元
         has_chinese = any('\u4e00' <= char <= '\u9fff' for char in src_text)
         
-        # 邏輯：有中文就轉英文，沒中文就轉繁體中文
+        # 邏輯判定：如果有中文就轉英文；如果完全沒中文(包含日文)就轉繁體中文
         target_lang = 'en' if has_chinese else 'zh-TW'
         
         try:
+            # 強制指定目標語言
             translated = GoogleTranslator(source='auto', target=target_lang).translate(src_text)
             
             label = "英文" if target_lang == 'en' else "繁體中文"
