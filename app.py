@@ -3,7 +3,6 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from deep_translator import GoogleTranslator
-from streamlit_sortables import sort_items
 
 # --- 1. 初始化 Google Sheets ---
 def init_gspread():
@@ -39,17 +38,24 @@ def save_to_gs(df):
         st.error(f"❌ 同步失敗: {e}")
         return False
 
-# --- 2. 網頁配置 ---
+# --- 2. 網頁配置與 CSS 優化 ---
 st.set_page_config(page_title="旅館客服系統", layout="wide")
 
-# CSS 修正：讓 code 區塊如果有捲軸時不要太醜，並限制 textarea 高度
 st.markdown("""
     <style>
-    code { white-space: pre-wrap !important; }
-    /* 限制 code 區塊的最大高度，超過會出捲軸 */
+    /* 讓 code 顯示框變得很短且有捲軸 */
     div[data-testid="stMarkdownContainer"] pre {
-        max-height: 200px !important;
+        max-height: 120px !important; /* 限制高度在約三行字左右 */
         overflow-y: auto !important;
+        background-color: #f8f9fa;
+        border: 1px solid #ddd;
+    }
+    code { white-space: pre-wrap !important; }
+    
+    /* 讓檢視按鈕更醒目 */
+    div.stButton > button {
+        border-radius: 20px;
+        font-weight: bold;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -58,6 +64,7 @@ if 'df' not in st.session_state:
     st.session_state.df = get_gs_data()
 
 # --- 3. 側邊欄 ---
+st.sidebar.title("🏨 旅館管理")
 branch = st.sidebar.selectbox("分館", ["喜園館", "中華館", "長沙館"])
 user_mode = st.sidebar.radio("類別", ["公版回覆", "個人常用"])
 is_admin = (st.sidebar.text_input("管理密碼", type="password") == "000000") if user_mode == "公版回覆" else True
@@ -74,36 +81,40 @@ if not view_df.empty:
     view_df = view_df.sort_values("priority")
 
     for idx, row in view_df.iterrows():
-        # 標題與備註
         note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
         header_text = f"📌 **{row['title']}** {note_display}"
         
         with st.expander(header_text):
-            # 建立兩個小按鈕來切換顯示內容
+            # 檢視按鈕：點擊後會顯示內容框
             btn_col1, btn_col2 = st.columns(2)
             
-            # 使用 session_state 來記錄目前這一個項目要顯示什麼
-            show_key = f"show_{idx}"
+            show_key = f"view_content_{idx}"
             if show_key not in st.session_state:
                 st.session_state[show_key] = None
 
-            if btn_col1.button("👁️ 檢視英文", key=f"v_en_{idx}"):
-                st.session_state[show_key] = "en"
-            if btn_col2.button("👁️ 檢視中文", key=f"v_tw_{idx}"):
-                st.session_state[show_key] = "tw"
+            if btn_col1.button("👁️ 檢視英文內容", key=f"v_en_{idx}"):
+                st.session_state[show_key] = ("🇺🇸 英文已就緒", row['content_en'])
+                st.toast("請點擊下方框框右上角圖示進行複製")
 
-            # 根據點擊顯示對應的內容框
-            if st.session_state[show_key] == "en":
-                st.caption("🇺🇸 English Content (可點擊右側複製)")
-                st.code(row['content_en'], language="text")
-            elif st.session_state[show_key] == "tw":
-                st.caption("🇹🇼 中文內容 (可點擊右側複製)")
-                st.code(row['content_tw'], language="text")
+            if btn_col2.button("👁️ 檢視中文內容", key=f"v_tw_{idx}"):
+                st.session_state[show_key] = ("🇹🇼 中文已就緒", row['content_tw'])
+                st.toast("請點擊下方框框右上角圖示進行複製")
+
+            # 顯示短小的檢視複製框
+            if st.session_state[show_key] is not None:
+                label, content = st.session_state[show_key]
+                st.info(f"**{label}**")
+                # 此 code 區塊受 CSS 限制，高度僅 120px，且內建複製按鈕
+                st.code(content, language="text")
+                
+                if st.button("✖️ 關閉內容", key=f"close_{idx}"):
+                    st.session_state[show_key] = None
+                    st.rerun()
             
-            # 管理按鈕（刪除）
+            # 管理按鈕
             if is_admin:
                 st.divider()
-                if st.button("🗑️ 刪除此模板", key=f"del_{idx}"):
+                if st.button("🗑️ 刪除", key=f"del_{idx}"):
                     st.session_state.df = st.session_state.df.drop(idx)
                     save_to_gs(st.session_state.df)
                     st.rerun()
