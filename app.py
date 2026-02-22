@@ -49,11 +49,10 @@ st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
 st.markdown("""
     <style>
-    /* 全寬度設定 */
     .block-container { padding-top: 2rem; max-width: 100% !important; }
     .stExpander { width: 100% !important; }
     
-    /* 重點：限制 st.code 複製框的高度並允許滾動 */
+    /* 限制 st.code 複製框的高度並允許滾動 */
     div[data-testid="stMarkdownContainer"] pre {
         max-height: 180px !important; 
         overflow-y: auto !important;
@@ -63,6 +62,15 @@ st.markdown("""
     
     code { white-space: pre-wrap !important; word-break: break-word !important; }
     textarea { font-family: sans-serif !important; }
+    
+    /* 讓編輯區塊有明顯區隔 */
+    .edit-box {
+        background-color: #fff4e6;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #ffd8a8;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -79,14 +87,10 @@ staff_name = "Kuma"
 ADMIN_PASSWORD = "000000"
 
 if user_mode == "公版回覆":
-    # 公版模式需要密碼
     pwd = st.sidebar.text_input("管理密碼", type="password")
     if pwd == ADMIN_PASSWORD:
         is_admin = True
-    elif pwd != "":
-        st.sidebar.error("密碼錯誤")
 else:
-    # 個人模式預設開啟編輯權限
     is_admin = True
     staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
     if staff_list:
@@ -100,7 +104,7 @@ if is_admin:
     with st.sidebar.expander("➕ 新增回覆模板", expanded=False):
         with st.form("add_form", clear_on_submit=True):
             n_t = st.text_input("模板標題 (必填)")
-            n_n = st.text_input("備註標籤 (例如：入住細節)")
+            n_n = st.text_input("備註標籤")
             n_e = st.text_area("英文內容", height=150)
             n_w = st.text_area("中文內容", height=150)
             if st.form_submit_button("💾 確認儲存模板"):
@@ -115,8 +119,6 @@ if is_admin:
                     st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
                     if save_to_gs(st.session_state.df):
                         st.rerun()
-                else:
-                    st.warning("標題不能為空！")
 
 # --- 5. 主畫面：翻譯中心 ---
 st.title(f"💬 {branch} 客服中心")
@@ -128,7 +130,7 @@ if src_text:
 
 st.divider()
 
-# --- 6. 內容顯示清單 ---
+# --- 6. 內容顯示與編輯邏輯 ---
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -139,7 +141,8 @@ else:
     view_df = view_df.sort_values("priority")
 
     for idx, row in view_df.iterrows():
-        col1, col2 = st.columns([0.92, 0.08])
+        # 標題列
+        col1, col2, col3 = st.columns([0.86, 0.07, 0.07])
         with col1:
             note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
             header_text = f"📌 **{row['title']}** {note_display}"
@@ -149,9 +152,35 @@ else:
                 st.write("**🇹🇼 中文**")
                 st.code(row['content_tw'], language="text")
         
+        # 登入後顯示 編輯與刪除 按鈕
         if is_admin:
             with col2:
-                if st.button("🗑️", key=f"del_{idx}"):
+                if st.button("✏️", key=f"edit_btn_{idx}"):
+                    st.session_state[f"edit_mode_{idx}"] = True
+            with col3:
+                if st.button("🗑️", key=f"del_btn_{idx}"):
                     st.session_state.df = st.session_state.df.drop(idx)
                     save_to_gs(st.session_state.df)
                     st.rerun()
+            
+            # 編輯區塊邏輯
+            if st.session_state.get(f"edit_mode_{idx}", False):
+                with st.container(border=True):
+                    st.markdown(f"🛠️ **修改模板：{row['title']}**")
+                    et = st.text_input("標題", row['title'], key=f"t_{idx}")
+                    en = st.text_input("備註", row['note'], key=f"n_{idx}")
+                    ee = st.text_area("英文內容", row['content_en'], key=f"en_{idx}", height=250)
+                    ew = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=250)
+                    
+                    ec1, ec2 = st.columns(2)
+                    if ec1.button("💾 儲存修改", key=f"save_edit_{idx}"):
+                        st.session_state.df.at[idx, 'title'] = et
+                        st.session_state.df.at[idx, 'note'] = en
+                        st.session_state.df.at[idx, 'content_en'] = ee
+                        st.session_state.df.at[idx, 'content_tw'] = ew
+                        save_to_gs(st.session_state.df)
+                        st.session_state[f"edit_mode_{idx}"] = False
+                        st.rerun()
+                    if ec2.button("✖️ 取消", key=f"cancel_{idx}"):
+                        st.session_state[f"edit_mode_{idx}"] = False
+                        st.rerun()
