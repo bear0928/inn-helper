@@ -157,11 +157,38 @@ if not view_df.empty:
     view_df = view_df.sort_values("priority")
 
     # 拖拽排序
+    # ✨ 拖拽排序介面 (優化為全寬列表樣式)
     if is_admin and sort_mode:
-        st.info("💡 請拖拽項目調整順序，完成後點擊儲存。")
+        st.info("💡 請直接「上下拖拽」標籤來調整順序，完成後點擊下方儲存。")
+        
+        # 注入 CSS 讓 sort_items 的每個標籤佔滿全寬
+        st.markdown("""
+            <style>
+            /* 針對拖拽組件的內層元件強制 100% 寬度 */
+            div[data-testid="stVerticalBlock"] > div:has(.st-emotion-cache-1vt4581) { 
+                width: 100% !important; 
+            }
+            /* 讓每一個可拖動的項目變成一整列 */
+            .st-emotion-cache-1vt4581 {
+                display: block !important;
+                width: 100% !important;
+                margin-bottom: 8px !important;
+                padding: 12px !important;
+                text-align: left !important;
+                font-size: 16px !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
         titles = view_df['title'].tolist()
+        
+        # 顯示拖拽組件
+        # direction="vertical" 配合 CSS 強制讓它變成垂直列表
         sorted_titles = sort_items(titles, key="drag_sort_list")
-        if st.button("💾 儲存全新排序順序", use_container_width=True):
+        
+        st.markdown("---")
+        if st.button("💾 儲存全新排序順序", use_container_width=True, type="primary"):
+            # 根據拖拽後的標題順序更新 priority
             for i, t in enumerate(sorted_titles):
                 st.session_state.df.loc[(st.session_state.df['title'] == t) & 
                                         (st.session_state.df['branch'] == branch) & 
