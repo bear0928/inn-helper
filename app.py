@@ -31,7 +31,6 @@ def get_gs_data():
     for col in cols:
         if col not in df.columns: 
             df[col] = ""
-    # 確保數值型欄位正確
     df['id'] = pd.to_numeric(df['id'], errors='coerce').fillna(0).astype(int)
     df['priority'] = pd.to_numeric(df['priority'], errors='coerce').fillna(999).astype(int)
     return df
@@ -54,21 +53,24 @@ st.set_page_config(page_title="旅館客服管理系統", layout="wide")
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem; }
-    [data-testid="stSidebar"] div:has(.st-emotion-cache-1vt4581) { width: 100% !important; }
-    .st-emotion-cache-1vt4581 {
-        display: block !important; width: 100% !important; margin-bottom: 6px !important;
-        padding: 10px !important; background-color: #ffffff !important;
-        border: 1px solid #ddd !important; border-radius: 6px !important;
-        font-size: 14px !important; color: #333 !important;
+    
+    /* 確保側邊欄內的 iframe 寬度撐滿 */
+    div[data-testid="stSidebar"] iframe {
+        width: 100% !important;
+        min-width: 100% !important;
     }
+
     div[data-testid="stTextArea"] textarea { font-size: 18px !important; }
     </style>
 """, unsafe_allow_html=True)
 
+# 注入 JavaScript：處理 Enter 送出，以及穿透 iframe 強制設定 100% 寬度的紅框樣式
 components.html(
     """
     <script>
     const doc = window.parent.document;
+    
+    // 1. 處理 Enter 鍵送出翻譯
     doc.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'TEXTAREA' && e.key === 'Enter') {
             if (!e.shiftKey) {
@@ -78,6 +80,63 @@ components.html(
             }
         }
     });
+
+    // 2. 穿透修改拖拽元件 (iframe) 內部的 CSS，強制一列一個 & 全寬
+    setInterval(() => {
+        const iframes = doc.querySelectorAll('iframe');
+        iframes.forEach(iframe => {
+            try {
+                const innerDoc = iframe.contentDocument || iframe.contentWindow.document;
+                // 檢查是否已注入過，避免重複注入
+                if (innerDoc && !innerDoc.getElementById('fix-sort-width')) {
+                    const style = innerDoc.createElement('style');
+                    style.id = 'fix-sort-width';
+                    style.innerHTML = `
+                        /* 強制容器為垂直排列，並讓內容伸展 */
+                        #root > div, .sortable-list, ul {
+                            display: flex !important;
+                            flex-direction: column !important;
+                            align-items: stretch !important;
+                            width: 100% !important;
+                            padding: 0 !important;
+                            margin: 0 !important;
+                            box-sizing: border-box !important;
+                        }
+                        
+                        /* 強制每個項目為 100% 寬度的紅色區塊 */
+                        #root > div > div, .sortable-item, li {
+                            width: 100% !important;
+                            max-width: 100% !important;
+                            display: block !important;
+                            background-color: #ff4b4b !important;
+                            color: white !important;
+                            padding: 12px 15px !important;
+                            margin-bottom: 8px !important;
+                            border-radius: 6px !important;
+                            box-sizing: border-box !important;
+                            text-align: center !important;
+                            font-size: 15px !important;
+                            font-weight: 500 !important;
+                            border: none !important;
+                            cursor: grab !important;
+                            white-space: normal !important;
+                            word-wrap: break-word !important;
+                        }
+                        
+                        /* 拖曳時的視覺回饋 */
+                        #root > div > div:active, .sortable-item:active, li:active {
+                            cursor: grabbing !important;
+                            opacity: 0.8 !important;
+                            box-shadow: 0px 4px 8px rgba(0,0,0,0.2) !important;
+                        }
+                    `;
+                    innerDoc.head.appendChild(style);
+                }
+            } catch(e) {
+                // 忽略跨域錯誤 (Cross-Origin)
+            }
+        });
+    }, 500);
     </script>
     """,
     height=0,
@@ -119,6 +178,27 @@ with st.sidebar:
     if is_admin:
         st.divider()
         sort_mode = st.toggle("↕️ 開啟拖拽排序模式")
+        
+        if sort_mode:
+            current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
+            sort_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
+            if not sort_df.empty:
+                sort_df = sort_df.sort_values("priority")
+                st.subheader("↕️ 拖拽排序清單")
+                titles = sort_df['title'].tolist()
+                
+                # 這裡的組件會被上方的 Javascript 動態注入樣式，強制滿版
+                sorted_titles = sort_items(titles, key="drag_sort_list")
+                
+                if st.button("💾 儲存排序", use_container_width=True, type="primary"):
+                    for i, t in enumerate(sorted_titles):
+                        st.session_state.df.loc[(st.session_state.df['title'] == t) & 
+                                                (st.session_state.df['branch'] == branch) & 
+                                                (st.session_state.df['category'] == current_cat), 'priority'] = i
+                    save_to_gs(st.session_state.df)
+                    st.rerun()
+            st.divider()
+
         with st.expander("➕ 新增回覆模板"):
             with st.form("add_form", clear_on_submit=True):
                 n_t = st.text_input("標題")
@@ -174,19 +254,6 @@ view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.se
 if not view_df.empty:
     view_df = view_df.sort_values("priority")
 
-    if is_admin and sort_mode:
-        with st.sidebar:
-            st.subheader("↕️ 拖拽排序清單")
-            titles = view_df['title'].tolist()
-            sorted_titles = sort_items(titles, key="drag_sort_list")
-            if st.button("💾 儲存排序", use_container_width=True, type="primary"):
-                for i, t in enumerate(sorted_titles):
-                    st.session_state.df.loc[(st.session_state.df['title'] == t) & 
-                                            (st.session_state.df['branch'] == branch) & 
-                                            (st.session_state.df['category'] == current_cat), 'priority'] = i
-                save_to_gs(st.session_state.df)
-                st.rerun()
-
     for idx, row in view_df.iterrows():
         col_main, col_edit, col_del = st.columns([0.88, 0.06, 0.06])
         with col_main:
@@ -211,29 +278,26 @@ if not view_df.empty:
         
         if st.session_state.get(f"edit_mode_{idx}", False):
             with st.container(border=True):
-                st.write(f"🔧 **修改與跨館同步 (ID: {row['id']})**")
+                st.write(f"🔧 **修改目前資料 (ID: {row['id']})**")
                 ec1, ec2 = st.columns(2)
                 with ec1: et = st.text_input("標題", row['title'], key=f"t_{idx}")
                 with ec2: en = st.text_input("備註", row['note'], key=f"n_{idx}")
                 
-                # 內容高度增加至 240
                 ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=240)
                 ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=240)
                 
-                # 按鈕順序調整：儲存與關閉在上
                 eb1, eb2 = st.columns(2)
                 if eb1.button("💾 更新目前分館", key=f"save_{idx}", use_container_width=True, type="primary"):
                     st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
                     save_to_gs(st.session_state.df)
                     st.session_state[f"edit_mode_{idx}"] = False
                     st.rerun()
-                if eb2.button("✖️ 關閉", key=f"cancel_{idx}", use_container_width=True):
+                if eb2.button("✖️ 關閉編輯", key=f"cancel_{idx}", use_container_width=True):
                     st.session_state[f"edit_mode_{idx}"] = False
                     st.rerun()
                 
                 st.divider()
                 
-                # 複製到其他館在下
                 st.caption("📋 **一鍵複製到其他分館**")
                 target_branches = [b for b in ALL_BRANCHES if b != branch]
                 cols_copy = st.columns(len(target_branches))
