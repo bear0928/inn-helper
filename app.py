@@ -54,102 +54,78 @@ st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem; }
     
-    /* 確保側邊欄內的 iframe 寬度撐滿 */
-    div[data-testid="stSidebar"] iframe {
-        width: 100% !important;
-        min-width: 100% !important;
+    /* 側邊欄拖拽樣式修正 */
+    div[data-testid="stSidebar"] iframe { width: 100% !important; }
+
+    /* 方框閱覽模式樣式 */
+    .card-container {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 15px;
+        background-color: #f9f9f9;
+        margin-bottom: 15px;
+        height: 100%;
+    }
+    .card-title {
+        color: #ff4b4b;
+        font-weight: bold;
+        font-size: 1.1rem;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 5px;
+        margin-bottom: 10px;
+    }
+    .card-content {
+        font-size: 0.9rem;
+        color: #333;
+        white-space: pre-wrap;
     }
 
     div[data-testid="stTextArea"] textarea { font-size: 18px !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# 注入 JavaScript：處理 Enter 送出，以及穿透 iframe 強制設定 100% 寬度的紅框樣式
 components.html(
     """
     <script>
     const doc = window.parent.document;
-    
-    // 1. 處理 Enter 鍵送出翻譯
     doc.addEventListener('keydown', function(e) {
-        if (e.target.tagName === 'TEXTAREA' && e.key === 'Enter') {
-            if (!e.shiftKey) {
-                e.preventDefault();
-                e.target.blur();
-                setTimeout(() => e.target.focus(), 100);
-            }
+        if (e.target.tagName === 'TEXTAREA' && e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault(); e.target.blur();
+            setTimeout(() => e.target.focus(), 100);
         }
     });
 
-    // 2. 穿透修改拖拽元件 (iframe) 內部的 CSS，強制一列一個 & 全寬
     setInterval(() => {
         const iframes = doc.querySelectorAll('iframe');
         iframes.forEach(iframe => {
             try {
                 const innerDoc = iframe.contentDocument || iframe.contentWindow.document;
-                // 檢查是否已注入過，避免重複注入
                 if (innerDoc && !innerDoc.getElementById('fix-sort-width')) {
                     const style = innerDoc.createElement('style');
                     style.id = 'fix-sort-width';
                     style.innerHTML = `
-                        /* 強制容器為垂直排列，並讓內容伸展 */
-                        #root > div, .sortable-list, ul {
-                            display: flex !important;
-                            flex-direction: column !important;
-                            align-items: stretch !important;
-                            width: 100% !important;
-                            padding: 0 !important;
-                            margin: 0 !important;
-                            box-sizing: border-box !important;
-                        }
-                        
-                        /* 強制每個項目為 100% 寬度的紅色區塊 */
-                        #root > div > div, .sortable-item, li {
-                            width: 100% !important;
-                            max-width: 100% !important;
-                            display: block !important;
-                            background-color: #ff4b4b !important;
-                            color: white !important;
-                            padding: 12px 15px !important;
-                            margin-bottom: 8px !important;
-                            border-radius: 6px !important;
-                            box-sizing: border-box !important;
-                            text-align: center !important;
-                            font-size: 15px !important;
-                            font-weight: 500 !important;
-                            border: none !important;
-                            cursor: grab !important;
-                            white-space: normal !important;
-                            word-wrap: break-word !important;
-                        }
-                        
-                        /* 拖曳時的視覺回饋 */
-                        #root > div > div:active, .sortable-item:active, li:active {
-                            cursor: grabbing !important;
-                            opacity: 0.8 !important;
-                            box-shadow: 0px 4px 8px rgba(0,0,0,0.2) !important;
+                        #root > div, .sortable-list, ul { display: flex !important; flex-direction: column !important; align-items: stretch !important; width: 100% !important; }
+                        #root > div > div, .sortable-item, li { 
+                            width: 100% !important; background-color: #ff4b4b !important; color: white !important; 
+                            padding: 12px !important; margin-bottom: 8px !important; border-radius: 6px !important; 
+                            text-align: center !important; cursor: grab !important; border: none !important;
                         }
                     `;
                     innerDoc.head.appendChild(style);
                 }
-            } catch(e) {
-                // 忽略跨域錯誤 (Cross-Origin)
-            }
+            } catch(e) {}
         });
     }, 500);
     </script>
-    """,
-    height=0,
+    """, height=0,
 )
 
-if 'df' not in st.session_state:
-    st.session_state.df = get_gs_data()
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
+if 'df' not in st.session_state: st.session_state.df = get_gs_data()
+if 'authenticated' not in st.session_state: st.session_state.authenticated = False
 
 ALL_BRANCHES = ["喜園館", "中華館", "長沙館"]
 
-# --- 3. 側邊欄：控制中心 ---
+# --- 3. 側邊欄 ---
 with st.sidebar:
     st.header("⚙️ 系統控制")
     branch = st.radio("📍 選擇目前分館", ALL_BRANCHES, index=0)
@@ -162,14 +138,10 @@ with st.sidebar:
     if user_mode == "公版回覆":
         if not st.session_state.authenticated:
             pwd = st.text_input("管理員密碼", type="password")
-            if pwd == "000000":
-                st.session_state.authenticated = True
-                st.rerun()
+            if pwd == "000000": st.session_state.authenticated = True; st.rerun()
         else:
             is_admin = True
-            if st.button("🔓 登出管理員", use_container_width=True):
-                st.session_state.authenticated = False
-                st.rerun()
+            if st.button("🔓 登出管理員", use_container_width=True): st.session_state.authenticated = False; st.rerun()
     else:
         is_admin = True
         staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
@@ -178,140 +150,97 @@ with st.sidebar:
     if is_admin:
         st.divider()
         sort_mode = st.toggle("↕️ 開啟拖拽排序模式")
-        
         if sort_mode:
             current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-            sort_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
+            sort_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].sort_values("priority")
             if not sort_df.empty:
-                sort_df = sort_df.sort_values("priority")
-                st.subheader("↕️ 拖拽排序清單")
                 titles = sort_df['title'].tolist()
-                
-                # 這裡的組件會被上方的 Javascript 動態注入樣式，強制滿版
                 sorted_titles = sort_items(titles, key="drag_sort_list")
-                
                 if st.button("💾 儲存排序", use_container_width=True, type="primary"):
                     for i, t in enumerate(sorted_titles):
-                        st.session_state.df.loc[(st.session_state.df['title'] == t) & 
-                                                (st.session_state.df['branch'] == branch) & 
-                                                (st.session_state.df['category'] == current_cat), 'priority'] = i
-                    save_to_gs(st.session_state.df)
-                    st.rerun()
+                        st.session_state.df.loc[(st.session_state.df['title'] == t) & (st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat), 'priority'] = i
+                    save_to_gs(st.session_state.df); st.rerun()
             st.divider()
 
         with st.expander("➕ 新增回覆模板"):
             with st.form("add_form", clear_on_submit=True):
-                n_t = st.text_input("標題")
-                n_n = st.text_input("備註")
-                n_e = st.text_area("英文內容")
-                n_w = st.text_area("中文內容")
+                n_t, n_n = st.text_input("標題"), st.text_input("備註")
+                n_e, n_w = st.text_area("英文內容"), st.text_area("中文內容")
                 if st.form_submit_button("💾 儲存項目", use_container_width=True):
                     if n_t:
                         target_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
                         next_id = int(st.session_state.df['id'].max()) + 1 if not st.session_state.df.empty else 1
                         current_max_p = st.session_state.df[st.session_state.df['branch'] == branch]['priority'].max()
                         next_p = int(current_max_p) + 1 if pd.notna(current_max_p) else 0
-                        
-                        new_row = pd.DataFrame([{
-                            "id": next_id, "branch": branch, "category": target_cat, 
-                            "title": n_t, "content_en": n_e, "content_tw": n_w, 
-                            "note": n_n, "priority": next_p
-                        }])
+                        new_row = pd.DataFrame([{"id": next_id, "branch": branch, "category": target_cat, "title": n_t, "content_en": n_e, "content_tw": n_w, "note": n_n, "priority": next_p}])
                         st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-                        save_to_gs(st.session_state.df)
-                        st.rerun()
+                        save_to_gs(st.session_state.df); st.rerun()
 
-# --- 4. 主畫面：翻譯中心 ---
+# --- 4. 主畫面：翻譯與檢視切換 ---
 st.title(f"🏨 {branch} 客服系統")
 
 with st.container(border=True):
     st.subheader("🌐 雙向翻譯中心")
-    src_text = st.text_area(
-        "輸入內容 (Enter 翻譯 / Shift+Enter 換行)：", 
-        placeholder="輸入外語 (日韓英等) → 轉繁體中文 | 輸入中文 → 轉英文", 
-        height=200, key="trans_input"
-    )
+    src_text = st.text_area("輸入內容：", placeholder="Enter 翻譯 / Shift+Enter 換行", height=150, key="trans_input")
     if src_text.strip():
-        try:
-            translated_to_tw = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-            if src_text.strip() == translated_to_tw.strip():
-                final_result = GoogleTranslator(source='auto', target='en').translate(src_text)
-                label = "英文"
-            else:
-                final_result = translated_to_tw
-                label = "繁體中文"
-            st.success(f"**翻譯結果 ({label})：**")
-            st.code(final_result, language="text")
-        except Exception as e:
-            st.error(f"翻譯發生錯誤: {e}")
+        translated_to_tw = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
+        final_result = GoogleTranslator(source='auto', target='en').translate(src_text) if src_text.strip() == translated_to_tw.strip() else translated_to_tw
+        st.success("**翻譯結果：**")
+        st.code(final_result, language="text")
 
 st.divider()
 
-# --- 5. 主畫面：回覆清單 ---
+# --- 檢視模式切換 ---
+view_mode = st.radio("👁️ 檢視方式", ["條列 (點開閱覽)", "方框 (直接顯示)"], horizontal=True)
+
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
-view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
+view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].sort_values("priority")
 
 if not view_df.empty:
-    view_df = view_df.sort_values("priority")
+    if view_mode == "方框 (直接顯示)":
+        # 每列顯示 2 個方塊
+        cols = st.columns(2)
+        for i, (idx, row) in enumerate(view_df.iterrows()):
+            with cols[i % 2]:
+                st.markdown(f"""
+                <div class="card-container">
+                    <div class="card-title">📌 {row['title']} {f'({row["note"]})' if row['note'] else ''}</div>
+                    <div style="font-size:0.8rem; color:gray; margin-bottom:5px;">English:</div>
+                    <div class="card-content">{row['content_en']}</div>
+                    <div style="font-size:0.8rem; color:gray; margin:10px 0 5px 0;">中文:</div>
+                    <div class="card-content">{row['content_tw']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                # 方塊模式下也提供編輯按鈕
+                if is_admin:
+                    if st.button("✏️ 編輯項目", key=f"ed_card_{idx}", use_container_width=True):
+                        st.session_state[f"edit_mode_{idx}"] = True; st.rerun()
+    else:
+        # 原有的條列模式
+        for idx, row in view_df.iterrows():
+            col_main, col_edit, col_del = st.columns([0.88, 0.06, 0.06])
+            with col_main:
+                with st.expander(f"📌 **{row['title']}** {f'｜ 🏷️ {row["note"]}' if row['note'] else ''}"):
+                    st.caption("🇺🇸 English"); st.code(row['content_en'], language="text")
+                    st.caption("🇹🇼 中文"); st.code(row['content_tw'], language="text")
+            if is_admin:
+                if col_edit.button("✏️", key=f"ed_{idx}"): st.session_state[f"edit_mode_{idx}"] = True; st.rerun()
+                if col_del.button("🗑️", key=f"de_{idx}"): st.session_state.df = st.session_state.df.drop(idx); save_to_gs(st.session_state.df); st.rerun()
 
+    # 統一處理編輯邏輯 (不論哪種檢視模式點開編輯)
     for idx, row in view_df.iterrows():
-        col_main, col_edit, col_del = st.columns([0.88, 0.06, 0.06])
-        with col_main:
-            title_label = f"📌 **{row['title']}**"
-            if row['note']: title_label += f" ｜ 🏷️ {row['note']}"
-            with st.expander(title_label):
-                st.caption("🇺🇸 English")
-                st.code(row['content_en'], language="text")
-                st.caption("🇹🇼 中文")
-                st.code(row['content_tw'], language="text")
-        
-        if is_admin:
-            with col_edit:
-                if st.button("✏️", key=f"ed_{idx}"):
-                    st.session_state[f"edit_mode_{idx}"] = not st.session_state.get(f"edit_mode_{idx}", False)
-                    st.rerun()
-            with col_del:
-                if st.button("🗑️", key=f"de_{idx}"):
-                    st.session_state.df = st.session_state.df.drop(idx)
-                    save_to_gs(st.session_state.df)
-                    st.rerun()
-        
         if st.session_state.get(f"edit_mode_{idx}", False):
             with st.container(border=True):
-                st.write(f"🔧 **修改目前資料 (ID: {row['id']})**")
+                st.write(f"🔧 **修改資料 (ID: {row['id']})**")
                 ec1, ec2 = st.columns(2)
-                with ec1: et = st.text_input("標題", row['title'], key=f"t_{idx}")
-                with ec2: en = st.text_input("備註", row['note'], key=f"n_{idx}")
-                
-                ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=240)
-                ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=240)
-                
+                et = ec1.text_input("標題", row['title'], key=f"t_{idx}")
+                en = ec2.text_input("備註", row['note'], key=f"n_{idx}")
+                ee = st.text_area("英文內容", row['content_en'], key=f"ee_{idx}", height=200)
+                ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=200)
                 eb1, eb2 = st.columns(2)
-                if eb1.button("💾 更新目前分館", key=f"save_{idx}", use_container_width=True, type="primary"):
+                if eb1.button("💾 儲存並關閉", key=f"save_{idx}", use_container_width=True, type="primary"):
                     st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
-                    save_to_gs(st.session_state.df)
-                    st.session_state[f"edit_mode_{idx}"] = False
-                    st.rerun()
-                if eb2.button("✖️ 關閉編輯", key=f"cancel_{idx}", use_container_width=True):
-                    st.session_state[f"edit_mode_{idx}"] = False
-                    st.rerun()
-                
-                st.divider()
-                
-                st.caption("📋 **一鍵複製到其他分館**")
-                target_branches = [b for b in ALL_BRANCHES if b != branch]
-                cols_copy = st.columns(len(target_branches))
-                for i, target_b in enumerate(target_branches):
-                    if cols_copy[i].button(f"🚀 複製到 {target_b}", key=f"cp_{idx}_{target_b}", use_container_width=True):
-                        new_id = int(st.session_state.df['id'].max()) + 1
-                        target_max_p = st.session_state.df[st.session_state.df['branch'] == target_b]['priority'].max()
-                        new_p = int(target_max_p) + 1 if pd.notna(target_max_p) else 0
-                        
-                        copy_row = pd.DataFrame([{
-                            "id": new_id, "branch": target_b, "category": current_cat, 
-                            "title": et, "content_en": ee, "content_tw": ew, "note": en, "priority": new_p
-                        }])
-                        st.session_state.df = pd.concat([st.session_state.df, copy_row], ignore_index=True)
-                        save_to_gs(st.session_state.df)
+                    save_to_gs(st.session_state.df); st.session_state[f"edit_mode_{idx}"] = False; st.rerun()
+                if eb2.button("✖️ 取消", key=f"cancel_{idx}", use_container_width=True): st.session_state[f"edit_mode_{idx}"] = False; st.rerun()
 else:
     st.info("💡 目前尚無資料。")
