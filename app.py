@@ -52,7 +52,7 @@ st.markdown("""
     /* 主容器 */
     .block-container { padding-top: 1.5rem; }
     
-    /* 側邊欄拖拽項目全寬樣式 */
+    /* 側邊欄拖拽項目樣式 */
     [data-testid="stSidebar"] div:has(.st-emotion-cache-1vt4581) { 
         width: 100% !important; 
     }
@@ -65,11 +65,12 @@ st.markdown("""
         border: 1px solid #ddd !important;
         border-radius: 6px !important;
         font-size: 14px !important;
+        color: #333 !important;
     }
 
-    /* 程式碼區塊樣式優化 */
+    /* 程式碼區塊樣式 */
     div[data-testid="stMarkdownContainer"] pre {
-        background-color: #f1f3f4 !important;
+        background-color: #f8f9fa !important;
         border-radius: 8px !important;
     }
     </style>
@@ -80,27 +81,38 @@ if 'df' not in st.session_state:
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# --- 3. 側邊欄：全局控制中心 ---
+# --- 3. 側邊欄：控制中心與工具 ---
 with st.sidebar:
     st.header("🏨 系統控制台")
     
-    # --- 搬移過來的：分館與模式 ---
+    # 分館與模式選擇
     branch = st.radio("📍 選擇分館", ["喜園館", "中華館", "長沙館"], index=0)
     user_mode = st.segmented_control("🔑 運作模式", ["公版回覆", "個人常用"], default="公版回覆")
     
     st.divider()
+
+    # 🌐 翻譯中心 (移動至側邊欄)
+    st.subheader("🌐 雙向翻譯中心")
+    src_text = st.text_area("自動偵測語言：", placeholder="貼上英文則轉中文\n貼上中文則轉英文...", height=100)
+    if src_text:
+        # 簡單邏輯判斷：如果包含中文則翻譯成英文，否則翻譯成繁中
+        is_chinese = any('\u4e00' <= char <= '\u9fff' for char in src_text)
+        target_lang = 'en' if is_chinese else 'zh-TW'
+        
+        translated = GoogleTranslator(source='auto', target=target_lang).translate(src_text)
+        st.success(f"**翻譯結果 ({target_lang})：**\n\n{translated}")
     
-    # 權限與管理邏輯
+    st.divider()
+    
+    # 權限與管理功能
     is_admin = False
     staff_name = "Kuma"
-    
     if user_mode == "公版回覆":
         if not st.session_state.authenticated:
             pwd = st.text_input("管理員密碼", type="password")
             if pwd == "000000":
                 st.session_state.authenticated = True
                 st.rerun()
-            st.warning("🔒 需密碼以開啟編輯與排序")
         else:
             is_admin = True
             if st.button("🔓 登出管理員", use_container_width=True):
@@ -109,12 +121,11 @@ with st.sidebar:
     else:
         is_admin = True
         staff_list = sorted(st.session_state.df[st.session_state.df['category'] != "公版回覆"]['category'].unique().tolist())
-        staff_name = st.selectbox("切換帳號", staff_list) if staff_list else st.text_input("建立新帳號", value="Kuma")
+        staff_name = st.selectbox("帳號切換", staff_list) if staff_list else st.text_input("新帳號", value="Kuma")
 
-    # 管理功能
     if is_admin:
         st.divider()
-        sort_mode = st.toggle("↕️ 開啟拖拽排序模式")
+        sort_mode = st.toggle("↕️ 開啟拖拽排序")
         
         with st.expander("➕ 新增回覆模板"):
             with st.form("add_form", clear_on_submit=True):
@@ -130,18 +141,10 @@ with st.sidebar:
                         save_to_gs(st.session_state.df)
                         st.rerun()
 
-# --- 4. 主畫面：翻譯與內容 ---
-st.title("旅館客服管理系統")
+# --- 4. 主畫面：內容顯示 ---
+st.title(f"旅館客服回覆系統 - {branch}")
+st.caption(f"當前模式：{user_mode} ({'管理員已登入' if st.session_state.authenticated else '檢視模式'})")
 
-# 翻譯中心
-src_text = st.text_input("🌐 翻譯中心 (自動偵測 → 繁中)：", placeholder="在此貼上客人訊息...")
-if src_text:
-    translated = GoogleTranslator(source='auto', target='zh-TW').translate(src_text)
-    st.info(f"**翻譯結果：**\n\n{translated}")
-
-st.divider()
-
-# 獲取資料
 current_cat = "公版回覆" if user_mode == "公版回覆" else staff_name
 view_df = st.session_state.df[(st.session_state.df['branch'] == branch) & (st.session_state.df['category'] == current_cat)].copy()
 
@@ -149,13 +152,13 @@ if not view_df.empty:
     view_df['priority'] = pd.to_numeric(view_df['priority'], errors='coerce').fillna(999)
     view_df = view_df.sort_values("priority")
 
-    # 側邊欄拖拽排序邏輯
+    # ↕️ 側邊欄拖拽排序邏輯
     if is_admin and sort_mode:
         with st.sidebar:
-            st.subheader("↕️ 拖拽排序")
+            st.subheader("↕️ 拖拽調整順序")
             titles = view_df['title'].tolist()
             sorted_titles = sort_items(titles, key="drag_sort_list")
-            if st.button("💾 儲存全新排序", use_container_width=True, type="primary"):
+            if st.button("💾 儲存順序", use_container_width=True, type="primary"):
                 for i, t in enumerate(sorted_titles):
                     st.session_state.df.loc[(st.session_state.df['title'] == t) & 
                                             (st.session_state.df['branch'] == branch) & 
@@ -163,15 +166,14 @@ if not view_df.empty:
                 save_to_gs(st.session_state.df)
                 st.rerun()
 
-    # 主畫面清單
+    # 清單內容
     for idx, row in view_df.iterrows():
         col_main, col_edit, col_del = st.columns([0.88, 0.06, 0.06])
         
         with col_main:
-            title_display = f"📌 **{row['title']}**"
-            if row['note']: title_display += f" ｜ 🏷️ {row['note']}"
-            
-            with st.expander(title_display):
+            title_text = f"📌 **{row['title']}**"
+            if row['note']: title_text += f" ｜ 🏷️ {row['note']}"
+            with st.expander(title_text):
                 st.caption("🇺🇸 English")
                 st.code(row['content_en'], language="text")
                 st.caption("🇹🇼 中文")
@@ -188,10 +190,9 @@ if not view_df.empty:
                     save_to_gs(st.session_state.df)
                     st.rerun()
         
-        # 原地編輯表單
         if st.session_state.get(f"edit_mode_{idx}", False):
             with st.container(border=True):
-                st.write(f"🔧 **編輯項目**")
+                st.write(f"🔧 **編輯：{row['title']}**")
                 ec1, ec2 = st.columns(2)
                 with ec1: et = st.text_input("標題", row['title'], key=f"t_{idx}")
                 with ec2: en = st.text_input("備註", row['note'], key=f"n_{idx}")
@@ -199,7 +200,7 @@ if not view_df.empty:
                 ew = st.text_area("中文內容", row['content_tw'], key=f"ew_{idx}", height=120)
                 
                 eb1, eb2 = st.columns(2)
-                if eb1.button("💾 儲存", key=f"save_{idx}", use_container_width=True):
+                if eb1.button("💾 確認更新", key=f"save_{idx}", use_container_width=True):
                     st.session_state.df.loc[idx, ['title','note','content_en','content_tw']] = [et, en, ee, ew]
                     save_to_gs(st.session_state.df)
                     st.session_state[f"edit_mode_{idx}"] = False
