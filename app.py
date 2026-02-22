@@ -54,11 +54,12 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
-# CSS 優化：確保代碼塊換行
+# CSS 優化：確保代碼塊換行與按鈕樣式
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
     textarea { font-family: sans-serif !important; }
+    div.stButton > button { width: 100%; border-radius: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -85,7 +86,7 @@ else:
     if staff_list:
         staff_name = st.sidebar.selectbox("員工帳號", staff_list)
     else:
-        staff_name = st.sidebar.text_input("輸入新員工姓名", value="Kuma")
+        staff_name = st.sidebar.text_input("輸入新員工姓名", value="")
 
 # --- 5. 新增模板 (Form) ---
 if is_admin:
@@ -147,20 +148,36 @@ else:
             st.rerun()
     else:
         for idx, row in view_df.iterrows():
-            col1, col2 = st.columns([0.85, 0.15])
-            with col1:
-                # ✨ UI 修正：標題加粗並使用 Emoji 分隔備註
+            col_main, col_admin = st.columns([0.85, 0.15])
+            with col_main:
+                # 標題加粗並使用 Emoji 分隔備註
                 note_display = f" ｜ 🏷️ {row['note']}" if row['note'] else ""
                 header_text = f"📌 **{row['title']}** {note_display}"
                 
                 with st.expander(header_text):
+                    # --- 快速複製按鈕區 ---
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button(f"📋 英", key=f"copy_en_{idx}"):
+                            # 透過 JavaScript 寫入剪貼簿
+                            js_code = f'navigator.clipboard.writeText(`{row["content_en"]}`);'
+                            st.components.v1.html(f"<script>{js_code}</script>", height=0)
+                            st.toast("已複製英文內容！")
+                    with c2:
+                        if st.button(f"📋 中", key=f"copy_tw_{idx}"):
+                            js_code = f'navigator.clipboard.writeText(`{row["content_tw"]}`);'
+                            st.components.v1.html(f"<script>{js_code}</script>", height=0)
+                            st.toast("已複製中文內容！")
+                    
+                    st.divider()
+                    
                     st.write("**🇺🇸 English**")
                     st.code(row['content_en'], language="text")
                     st.write("**🇹🇼 中文**")
                     st.code(row['content_tw'], language="text")
             
             if is_admin:
-                with col2:
+                with col_admin:
                     if st.button("✏️", key=f"edit_btn_{idx}"):
                         st.session_state[f"edit_mode_{idx}"] = True
                     if st.button("🗑️", key=f"del_btn_{idx}"):
@@ -176,8 +193,8 @@ else:
                         ee = st.text_area("英文內容", row['content_en'], key=f"en_{idx}", height=300)
                         ew = st.text_area("中文內容", row['content_tw'], key=f"tw_{idx}", height=300)
                         
-                        c1, c2 = st.columns(2)
-                        if c1.button("💾 儲存修改", key=f"save_edit_{idx}"):
+                        btn_c1, btn_c2 = st.columns(2)
+                        if btn_c1.button("💾 儲存修改", key=f"save_edit_{idx}"):
                             st.session_state.df.at[idx, 'title'] = et
                             st.session_state.df.at[idx, 'note'] = en
                             st.session_state.df.at[idx, 'content_en'] = ee
@@ -185,6 +202,6 @@ else:
                             save_to_gs(st.session_state.df)
                             st.session_state[f"edit_mode_{idx}"] = False
                             st.rerun()
-                        if c2.button("✖️ 取消", key=f"cancel_{idx}"):
+                        if btn_c2.button("✖️ 取消", key=f"cancel_{idx}"):
                             st.session_state[f"edit_mode_{idx}"] = False
                             st.rerun()
