@@ -47,19 +47,26 @@ def save_to_gs(df):
 # --- 2. 網頁基礎配置 ---
 st.set_page_config(page_title="旅館客服雲端系統", layout="wide")
 
-# CSS 優化：調整按鈕間距與對齊，並確保手機版按鈕不會過大
+# CSS 優化：將按鈕縮小，並移除多餘間距
 st.markdown("""
     <style>
     code { white-space: pre-wrap !important; word-break: break-word !important; }
     textarea { font-family: sans-serif !important; }
-    /* 讓按鈕高度與標題更整齊 */
-    div.stButton > button { 
-        width: 100%; 
-        padding: 2px 5px;
-        font-size: 14px;
+    
+    /* 讓複製按鈕縮到最小，並置中 */
+    div.stButton > button {
+        width: 100% !important;
+        padding: 0px !important;
+        height: 38px !important;
+        min-width: 30px !important;
+        border-radius: 4px;
+        font-weight: bold;
     }
-    /* 隱藏 HTML 元件的間距 */
-    iframe { display: block; }
+    
+    /* 移除欄位間的預設間隔 */
+    [data-testid="column"] {
+        padding: 0 2px !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -145,9 +152,8 @@ else:
             st.rerun()
     else:
         for idx, row in view_df.iterrows():
-            # 建立四個欄位：[中按鈕, 英按鈕, 標題與展開, 管理按鈕]
-            # 比例：0.08, 0.08, 0.74, 0.1
-            btn_zh, btn_en, main_content, admin_btns = st.columns([0.08, 0.08, 0.74, 0.1])
+            # ✨ 比例優化：中英按鈕欄位縮小至 0.05
+            btn_zh, btn_en, main_content, admin_btns = st.columns([0.05, 0.05, 0.82, 0.08])
             
             with btn_zh:
                 if st.button("中", key=f"copy_tw_{idx}"):
@@ -172,7 +178,6 @@ else:
             
             if is_admin:
                 with admin_btns:
-                    # 使用小字體或 emoji 節省空間
                     sub_c1, sub_c2 = st.columns(2)
                     if sub_c1.button("✏️", key=f"edit_btn_{idx}"):
                         st.session_state[f"edit_mode_{idx}"] = True
